@@ -3,7 +3,7 @@ import Foundation
 @main
 struct Runner {
     static func main() throws {
-        let service = DatabaseService(databaseURL: URL(fileURLWithPath: "/tmp/universal-inventory-workflow-smoke-db/InventoryData.sqlite"))
+        let service = DatabaseService(databaseURL: URL(fileURLWithPath: "/tmp/inventory-manager-workflow-smoke-db/InventoryData.sqlite"))
         try service.ensureSchema()
         let smokeSuffix = String(Int(Date().timeIntervalSince1970))
 

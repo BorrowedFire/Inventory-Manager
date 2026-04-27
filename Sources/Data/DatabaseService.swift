@@ -316,6 +316,16 @@ final class DatabaseService: @unchecked Sendable {
         return DashboardSnapshot(stats: stats, budgets: budgets, vendors: vendors, activity: activity)
     }
 
+    func checkpointForBackup() throws {
+        try accessQueue.sync {
+            let db = try openDatabase(readOnly: false)
+            defer { sqlite3_close(db) }
+            guard sqlite3_wal_checkpoint_v2(db, nil, SQLITE_CHECKPOINT_TRUNCATE, nil, nil) == SQLITE_OK else {
+                throw DatabaseError.stepFailed(lastMessage(from: db))
+            }
+        }
+    }
+
     func inventoryItems() throws -> [InventoryItemRecord] {
         try query(
             """

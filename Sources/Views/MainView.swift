@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 struct MainView: View {
     @ObservedObject var model: AppModel
@@ -14,12 +15,10 @@ struct MainView: View {
     @State private var budgetYearDraft = ""
 
     var body: some View {
-        HStack(spacing: 0) {
+        NavigationSplitView {
             sidebar
-                .frame(width: 248)
-
-            Divider()
-
+                .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
+        } detail: {
             detail
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -149,69 +148,32 @@ struct MainView: View {
     }
 
     private var sidebar: some View {
-        VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(model.appDisplayName)
-                    .font(.system(size: 19, weight: .bold, design: .rounded))
-                    .foregroundStyle(AppTheme.text)
-                    .lineLimit(2)
-                Text(model.organizationName)
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
-                    .foregroundStyle(AppTheme.muted)
-                    .lineLimit(2)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 20)
-            .padding(.top, 20)
-            .padding(.bottom, 18)
-
-            VStack(spacing: 6) {
+        List(selection: $model.selectedSection) {
+            Section {
                 ForEach(AppSection.allCases) { section in
-                    Button {
-                        model.selectedSection = section
-                    } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: section.systemImage)
-                                .font(.system(size: 14, weight: .semibold))
-                                .frame(width: 18)
-                            Text(section.rawValue)
-                                .font(.system(size: 14, weight: .semibold, design: .rounded))
-                            Spacer()
-                        }
-                        .foregroundStyle(model.selectedSection == section ? Color.white : AppTheme.text)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 12)
-                        .background(
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .fill(model.selectedSection == section ? AppTheme.blue : Color.clear)
-                        )
-                    }
-                    .buttonStyle(.plain)
+                    Label(section.rawValue, systemImage: section.systemImage)
+                        .tag(section)
                 }
+            } header: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(model.appDisplayName)
+                        .font(.headline)
+                        .textCase(nil)
+                    Text(model.organizationName)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textCase(nil)
+                }
+                .padding(.vertical, 6)
             }
-            .padding(.horizontal, 14)
 
-            Spacer()
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text(model.currentUser.displayName)
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
-                Text(model.currentUser.role.replacingOccurrences(of: "_", with: " ").capitalized)
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundStyle(AppTheme.muted)
+            Section("Workspace") {
+                LabeledContent("User", value: model.currentUser.displayName)
+                LabeledContent("Role", value: model.currentUser.role.replacingOccurrences(of: "_", with: " ").capitalized)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(16)
-            .background(.ultraThinMaterial)
         }
-        .frame(maxHeight: .infinity)
-        .background(
-            LinearGradient(
-                colors: [Color.white.opacity(0.95), Color(red: 0.91, green: 0.92, blue: 0.95)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        )
+        .listStyle(.sidebar)
+        .navigationTitle(model.appDisplayName)
     }
 
     @ViewBuilder
@@ -467,15 +429,9 @@ struct MainView: View {
                 }
             }
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 10) {
-                    inventoryHeader
-                    ForEach(model.filteredInventory, id: \.id) { item in
-                        inventoryLedgerRow(item)
-                    }
-                }
-            }
-            .frostedPanel()
+            inventoryTable
+                .frame(minHeight: 460)
+                .frostedPanel()
         }
     }
 
@@ -512,15 +468,9 @@ struct MainView: View {
                 }
             }
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 10) {
-                    deploymentHeader
-                    ForEach(model.filteredDeployments) { deployment in
-                        deploymentRow(deployment)
-                    }
-                }
-            }
-            .frostedPanel()
+            deploymentTable
+                .frame(minHeight: 460)
+                .frostedPanel()
         }
         .confirmationDialog(
             "Return deployment?",
@@ -540,6 +490,111 @@ struct MainView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text(deploymentToReturn?.description ?? "")
+        }
+    }
+
+    private var inventoryTable: some View {
+        Table(model.filteredInventory) {
+            TableColumn("Type") { item in
+                HStack(spacing: 8) {
+                    ItemTypeIconView(itemType: item.itemType, size: 14)
+                    Text(item.itemType)
+                }
+            }
+            .width(min: 110, ideal: 130)
+
+            TableColumn("Item") { item in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.description)
+                        .lineLimit(1)
+                    Text(item.partNumber.isEmpty ? "No part number" : item.partNumber)
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.muted)
+                        .lineLimit(1)
+                }
+            }
+            .width(min: 260, ideal: 340)
+
+            TableColumn("Vendor", value: \.vendor)
+                .width(min: 110, ideal: 140)
+            TableColumn("PO", value: \.poNumber)
+                .width(min: 90, ideal: 120)
+            TableColumn("Received") { item in
+                Text("\(item.qtyReceived)/\(item.quantity)")
+                    .monospacedDigit()
+            }
+            .width(80)
+            TableColumn("Available") { item in
+                Text("\(item.availableQuantity)")
+                    .monospacedDigit()
+                    .foregroundStyle(item.availableQuantity == 0 ? AppTheme.rose : AppTheme.teal)
+            }
+            .width(82)
+            TableColumn("Unit Cost") { item in
+                Text(currency(item.unitCost))
+                    .monospacedDigit()
+            }
+            .width(100)
+            TableColumn("Stockroom", value: \.stockroomName)
+                .width(min: 120, ideal: 160)
+            TableColumn("Actions") { item in
+                HStack(spacing: 8) {
+                    Button("Edit") {
+                        inventoryEditorItem = item
+                    }
+                    Button("Deploy") {
+                        deploymentDraft = DeploymentSheetModel(item: item)
+                    }
+                    .disabled(item.availableQuantity <= 0)
+                }
+                .buttonStyle(.borderless)
+            }
+            .width(130)
+        }
+    }
+
+    private var deploymentTable: some View {
+        Table(model.filteredDeployments) {
+            TableColumn("Type") { deployment in
+                HStack(spacing: 8) {
+                    ItemTypeIconView(itemType: deployment.itemType, size: 14)
+                    Text(deployment.itemType)
+                }
+            }
+            .width(min: 110, ideal: 130)
+
+            TableColumn("Item") { deployment in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(deployment.description)
+                        .lineLimit(1)
+                    Text(deployment.partNumber.isEmpty ? "No part number" : deployment.partNumber)
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.muted)
+                        .lineLimit(1)
+                }
+            }
+            .width(min: 260, ideal: 340)
+
+            TableColumn("Qty") { deployment in
+                Text("\(deployment.qtyDeployed)")
+                    .monospacedDigit()
+            }
+            .width(56)
+            TableColumn("Deployed To", value: \.deployedTo)
+                .width(min: 140, ideal: 180)
+            TableColumn("Deployed By", value: \.deployedBy)
+                .width(min: 120, ideal: 160)
+            TableColumn("Date", value: \.deployedDate)
+                .width(min: 110, ideal: 130)
+            TableColumn("Location", value: \.deployedLocation)
+                .width(min: 120, ideal: 160)
+            TableColumn("Actions") { deployment in
+                Button("Return") {
+                    deploymentToReturn = deployment
+                }
+                .buttonStyle(.borderless)
+            }
+            .width(90)
         }
     }
 
@@ -685,9 +740,15 @@ struct MainView: View {
                 }
 
                 if model.parsedImportItems.isEmpty {
-                    Text("No PDFs selected yet. Review extracted rows before saving them into inventory.")
-                        .foregroundStyle(AppTheme.muted)
-                        .frostedPanel()
+                    VStack(alignment: .leading, spacing: 10) {
+                        Label("Drop purchase-order PDFs here", systemImage: "square.and.arrow.down.on.square")
+                            .font(.headline)
+                        Text("Or choose PDFs with the button above. Extracted rows stay editable until you save them into inventory.")
+                            .foregroundStyle(AppTheme.muted)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 180, alignment: .center)
+                    .frostedPanel()
+                    .onDrop(of: [UTType.pdf.identifier], isTargeted: nil, perform: handlePDFDrop)
                 } else {
                     ForEach($model.parsedImportItems) { $item in
                         ParsedImportEditor(item: $item)
@@ -695,6 +756,42 @@ struct MainView: View {
                 }
             }
         }
+    }
+
+    private func handlePDFDrop(_ providers: [NSItemProvider]) -> Bool {
+        let pdfProviders = providers.filter { $0.hasItemConformingToTypeIdentifier(UTType.pdf.identifier) }
+        guard !pdfProviders.isEmpty else { return false }
+
+        let group = DispatchGroup()
+        let queue = DispatchQueue(label: "com.inventorymanager.pdf-drop")
+        var urls: [URL] = []
+
+        for provider in pdfProviders {
+            group.enter()
+            provider.loadFileRepresentation(forTypeIdentifier: UTType.pdf.identifier) { url, _ in
+                defer { group.leave() }
+                guard let url else { return }
+                let destination = FileManager.default.temporaryDirectory
+                    .appendingPathComponent(UUID().uuidString)
+                    .appendingPathExtension("pdf")
+                do {
+                    if FileManager.default.fileExists(atPath: destination.path) {
+                        try FileManager.default.removeItem(at: destination)
+                    }
+                    try FileManager.default.copyItem(at: url, to: destination)
+                    queue.sync { urls.append(destination) }
+                } catch {
+                    DispatchQueue.main.async {
+                        model.errorMessage = error.localizedDescription
+                    }
+                }
+            }
+        }
+
+        group.notify(queue: .main) {
+            Task { await model.parsePDFs(urls: urls) }
+        }
+        return true
     }
 
     private var settingsView: some View {
@@ -761,6 +858,16 @@ struct MainView: View {
                     }
                     Button("Use Default Workspace Location") {
                         Task { await model.createDatabaseAtDefaultLocation() }
+                    }
+                    Button("Back Up Database") {
+                        if let url = FileDialogs.chooseDatabaseSaveURL(defaultName: "InventoryData Backup.sqlite") {
+                            Task { await model.backupDatabase(to: url) }
+                        }
+                    }
+                    Button("Restore Database") {
+                        if let url = FileDialogs.chooseDatabaseFile() {
+                            Task { await model.restoreDatabase(from: url) }
+                        }
                     }
                 }
 

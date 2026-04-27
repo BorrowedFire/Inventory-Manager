@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_CACHE="/tmp/inventory-manager-fresh-smoke-cache"
-SMOKE_BIN="/tmp/universal_inventory_fresh_workspace_smoke"
+SMOKE_BIN="/tmp/inventory_manager_fresh_workspace_smoke"
 
 mkdir -p "$BUILD_CACHE" /tmp/inventory-manager-fresh-smoke
 rm -f "$SMOKE_BIN"

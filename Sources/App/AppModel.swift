@@ -456,6 +456,41 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func backupDatabase(to destinationURL: URL) async {
+        do {
+            let databaseService = self.databaseService
+            try await retryingDatabaseCall { try databaseService.checkpointForBackup() }
+            let fileManager = FileManager.default
+            if fileManager.fileExists(atPath: destinationURL.path) {
+                try fileManager.removeItem(at: destinationURL)
+            }
+            try fileManager.copyItem(at: databaseURL, to: destinationURL)
+            lastImportSummary = "Database backup saved to \(destinationURL.lastPathComponent)."
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func restoreDatabase(from sourceURL: URL) async {
+        do {
+            let fileManager = FileManager.default
+            let targetURL = databaseURL
+            let backupURL = targetURL.deletingLastPathComponent().appendingPathComponent("InventoryData-before-restore-\(Int(Date().timeIntervalSince1970)).sqlite")
+            if fileManager.fileExists(atPath: targetURL.path) {
+                try fileManager.copyItem(at: targetURL, to: backupURL)
+                try fileManager.removeItem(at: targetURL)
+            }
+            try fileManager.copyItem(at: sourceURL, to: targetURL)
+            databaseService = DatabaseService(databaseURL: targetURL)
+            selectedInventoryID = nil
+            selectedStockroomID = nil
+            lastImportSummary = "Database restored. Previous database backed up as \(backupURL.lastPathComponent)."
+            await load()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func exportBlankInventoryTemplateCSV(to url: URL) async {
         let csv = [
             "Item Type,Description,Manufacturer,Part Number,Purchase Date,Vendor,Unit Cost,Quantity,Qty Received,PO Number,Budget Type,Stockroom,Notes",

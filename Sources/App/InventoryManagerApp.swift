@@ -60,6 +60,10 @@ struct InventoryManagerApp: App {
                 }
             }
         }
+
+        Settings {
+            AppSettingsView(model: model)
+        }
     }
 
     private static func applyBundledAppIcon() {
