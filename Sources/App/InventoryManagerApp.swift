@@ -1,9 +1,15 @@
 import SwiftUI
 import AppKit
+import Sparkle
 
 @main
 struct InventoryManagerApp: App {
     @StateObject private var model = AppModel()
+    private let updaterController = SPUStandardUpdaterController(
+        startingUpdater: true,
+        updaterDelegate: nil,
+        userDriverDelegate: nil
+    )
 
     init() {
         Self.applyBundledAppIcon()
@@ -39,6 +45,12 @@ struct InventoryManagerApp: App {
                     }
                 }
                 .disabled(model.excelInventoryPath.isEmpty)
+            }
+
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") {
+                    updaterController.checkForUpdates(nil)
+                }
             }
 
             CommandMenu("Inventory") {

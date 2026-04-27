@@ -95,5 +95,6 @@ For public/team distribution without Gatekeeper warnings, sign with a Developer 
 ## Documentation
 
 - `docs/ARCHITECTURE.md`
+- `docs/SPARKLE_UPDATES.md`
 - `SECURITY.md`
 - `CONTRIBUTING.md`

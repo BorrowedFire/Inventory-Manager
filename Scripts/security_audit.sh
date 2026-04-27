@@ -10,7 +10,7 @@ if ! command -v rg >/dev/null 2>&1; then
 fi
 
 SENSITIVE_PATTERN='northwell|workplace technology|\bwts\b|wtsinventory|northwellhealth|onedrive|dalvis|selene|exec ?tech|pellera|converge|derive|ergonomic group|\begi\b|\bcdw\b|applecare|github_pat|ghp_|gho_|BEGIN (RSA|DSA|EC|OPENSSH|PRIVATE) KEY|xox[baprs]-|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|sk-[A-Za-z0-9]{20,}'
-ALLOW_PATTERN='DerivedData|private keys|API keys|tokens|employer-specific paths|associated cache records|Release[[:space:]]+Derived'
+ALLOW_PATTERN='DerivedData|private key|Private key|private keys|API keys|tokens|notarytool|Keychain|employer-specific paths|associated cache records|Release[[:space:]]+Derived'
 
 matches=$(rg -n -i "$SENSITIVE_PATTERN" . \
   --glob '!.git/**' \
