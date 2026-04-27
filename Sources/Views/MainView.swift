@@ -40,6 +40,13 @@ struct MainView: View {
                 .help("Refresh workspace")
 
                 Button {
+                    FileDialogs.revealInFinder(model.databaseURL)
+                } label: {
+                    Label("Reveal Database", systemImage: "folder")
+                }
+                .help("Reveal the current SQLite database in Finder")
+
+                Button {
                     model.selectedSection = .settings
                 } label: {
                     Label("Settings", systemImage: "gearshape")
@@ -869,6 +876,13 @@ struct MainView: View {
                             Task { await model.restoreDatabase(from: url) }
                         }
                     }
+                    Button("Reveal in Finder") {
+                        FileDialogs.revealInFinder(model.databaseURL)
+                    }
+                    Button("Load Demo Data") {
+                        Task { await model.loadDemoWorkspace() }
+                    }
+                    .disabled(!model.isWorkspaceEmpty)
                 }
 
                 Divider()
@@ -1017,12 +1031,19 @@ struct MainView: View {
                 }
                 Spacer()
                 if model.isWorkspaceEmpty {
-                    Text("Fresh Workspace")
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundStyle(AppTheme.blue)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(AppTheme.blue.opacity(0.10), in: Capsule())
+                    HStack(spacing: 8) {
+                        Text("Fresh Workspace")
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .foregroundStyle(AppTheme.blue)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(AppTheme.blue.opacity(0.10), in: Capsule())
+                        Button("Load Demo") {
+                            Task { await model.loadDemoWorkspace() }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(AppTheme.blue)
+                    }
                 }
             }
 

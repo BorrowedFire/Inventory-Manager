@@ -14,3 +14,4 @@ xcodebuild \
   build
 SmokeTests/run_fresh_workspace_smoke.sh
 SmokeTests/run_workflow_smoke.sh
+/usr/bin/python3 SmokeTests/import_fixture_smoke.py

@@ -127,6 +127,12 @@ final class DatabaseService: @unchecked Sendable {
             CREATE INDEX IF NOT EXISTS index_audit_log_on_createdAt ON audit_log(createdAt);
             CREATE INDEX IF NOT EXISTS index_audit_log_on_action ON audit_log(action);
 
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+              version INTEGER PRIMARY KEY,
+              name TEXT NOT NULL,
+              appliedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+
             CREATE TABLE IF NOT EXISTS annual_budgets (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               year INTEGER NOT NULL,
@@ -206,6 +212,16 @@ final class DatabaseService: @unchecked Sendable {
               AND trim(COALESCE(d.partNumber, '')) <> '';
             """
             guard sqlite3_exec(db, reconcileSQL, nil, nil, nil) == SQLITE_OK else {
+                throw DatabaseError.stepFailed(lastMessage(from: db))
+            }
+
+            let migrationSQL = """
+            INSERT OR IGNORE INTO schema_migrations(version, name) VALUES
+              (1, 'initial_public_schema'),
+              (2, 'transactional_imports_and_inventory_constraints'),
+              (3, 'native_mac_product_polish');
+            """
+            guard sqlite3_exec(db, migrationSQL, nil, nil, nil) == SQLITE_OK else {
                 throw DatabaseError.stepFailed(lastMessage(from: db))
             }
         }
@@ -314,6 +330,67 @@ final class DatabaseService: @unchecked Sendable {
         }
 
         return DashboardSnapshot(stats: stats, budgets: budgets, vendors: vendors, activity: activity)
+    }
+
+    func seedDemoWorkspace() throws {
+        try withTransaction { db in
+            let counts = try query(
+                "SELECT (SELECT COUNT(*) FROM inventory_items) AS inventoryCount, (SELECT COUNT(*) FROM stockrooms) AS stockroomCount",
+                db: db
+            ).first
+            guard counts?.int(named: "inventoryCount") == 0, counts?.int(named: "stockroomCount") == 0 else {
+                throw DatabaseError.stepFailed("Demo data can only be loaded into an empty workspace.")
+            }
+
+            try execute(
+                "INSERT INTO stockrooms(name, location, department, createdBy) VALUES (?, ?, ?, NULL)",
+                bindings: [.text("Main Stockroom"), .text("Headquarters"), .text("Operations")],
+                db: db
+            )
+            let stockroomID = try query("SELECT last_insert_rowid() AS id", db: db).first?.int64(named: "id")
+
+            let sampleItems: [(String, String, String, String, String, String, Double, Int, Int, String, String, String)] = [
+                ("Laptop", "13-inch laptop", "Example Manufacturer", "LAP-1300", "2026-01-12", "Example Vendor", 1499, 8, 8, "PO-1001", "Capital", "Ready for deployment"),
+                ("Monitor", "27-inch display", "Example Manufacturer", "MON-2700", "2026-01-15", "Example Vendor", 329, 12, 12, "PO-1002", "Capital", "Desk setup inventory"),
+                ("Peripheral", "Wireless keyboard and mouse kit", "Example Manufacturer", "KIT-240", "2026-02-03", "Example Supplier", 89, 20, 20, "PO-1003", "OpEx", "Accessory kit")
+            ]
+
+            for item in sampleItems {
+                try execute(
+                    """
+                    INSERT INTO inventory_items(
+                      itemType, description, manufacturer, partNumber, purchaseDate, vendor,
+                      unitCost, quantity, qtyReceived, poNumber, budgetType, stockroomId, notes
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    bindings: [
+                        .text(item.0), .text(item.1), .text(item.2), .text(item.3), .text(item.4), .text(item.5),
+                        .double(item.6), .int(item.7), .int(item.8), .text(item.9), .text(item.10), .optionalInt64(stockroomID), .text(item.11)
+                    ],
+                    db: db
+                )
+            }
+
+            let laptopID = try query(
+                "SELECT id FROM inventory_items WHERE partNumber = ? LIMIT 1",
+                bindings: [.text("LAP-1300")],
+                db: db
+            ).first?.int64(named: "id")
+            try execute(
+                """
+                INSERT INTO deployments(
+                  inventoryItemId, itemType, description, manufacturer, partNumber, stockroomId,
+                  qtyDeployed, deployedTo, deployedBy, deployedDate, deployedLocation, notes
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                bindings: [
+                    .optionalInt64(laptopID), .text("Laptop"), .text("13-inch laptop"), .text("Example Manufacturer"), .text("LAP-1300"), .optionalInt64(stockroomID),
+                    .int(2), .text("Example Team"), .text(NSUserName()), .text("2026-02-10"), .text("HQ"), .text("Demo deployment")
+                ],
+                db: db
+            )
+            try insertAudit(action: "import", entityType: "demo", entityId: 0, details: "Loaded demo workspace data", performedBy: NSUserName(), db: db)
+        }
     }
 
     func checkpointForBackup() throws {

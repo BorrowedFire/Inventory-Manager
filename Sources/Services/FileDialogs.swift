@@ -3,6 +3,16 @@ import UniformTypeIdentifiers
 
 enum FileDialogs {
     @MainActor
+    static func revealInFinder(_ url: URL) {
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    @MainActor
+    static func openInFinder(_ url: URL) {
+        NSWorkspace.shared.open(url)
+    }
+
+    @MainActor
     static func chooseExcelFile() -> URL? {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.spreadsheet]
@@ -44,6 +54,14 @@ enum FileDialogs {
     static func chooseDatabaseSaveURL(defaultName: String) -> URL? {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.database, .data]
+        panel.nameFieldStringValue = defaultName
+        return panel.runModal() == .OK ? panel.url : nil
+    }
+
+    @MainActor
+    static func chooseDMGSaveURL(defaultName: String) -> URL? {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.diskImage]
         panel.nameFieldStringValue = defaultName
         return panel.runModal() == .OK ? panel.url : nil
     }

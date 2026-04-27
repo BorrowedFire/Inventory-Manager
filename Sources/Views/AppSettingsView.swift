@@ -42,6 +42,13 @@ struct AppSettingsView: View {
                             Task { await model.restoreDatabase(from: url) }
                         }
                     }
+                    Button("Reveal") {
+                        FileDialogs.revealInFinder(model.databaseURL)
+                    }
+                    Button("Load Demo") {
+                        Task { await model.loadDemoWorkspace() }
+                    }
+                    .disabled(!model.isWorkspaceEmpty)
                 }
             }
 

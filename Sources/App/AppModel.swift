@@ -456,6 +456,17 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func loadDemoWorkspace() async {
+        do {
+            let databaseService = self.databaseService
+            try await retryingDatabaseCall { try databaseService.seedDemoWorkspace() }
+            lastImportSummary = "Demo workspace loaded. You can remove it later by creating a new database."
+            await load()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func backupDatabase(to destinationURL: URL) async {
         do {
             let databaseService = self.databaseService
