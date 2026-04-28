@@ -34,6 +34,12 @@ export APP_SPECIFIC_PASSWORD="xxxx-xxxx-xxxx-xxxx"
 export TEAM_ID="TEAMID"
 ```
 
+Alternatively, configure notarytool credentials once in Keychain and use:
+
+```bash
+export NOTARYTOOL_PROFILE="inventory-manager-notary"
+```
+
 Then run:
 
 ```bash
@@ -46,6 +52,9 @@ Upload these assets to the GitHub Release:
 
 - `dist/InventoryManager-macOS.zip`
 - `dist/appcast.xml`
+
+`dist/InventoryManager-macOS.zip` must be the final ZIP created after stapling,
+not the temporary ZIP submitted to Apple for notarization.
 
 Do not upload local databases, spreadsheets, signing keys, or DerivedData.
 

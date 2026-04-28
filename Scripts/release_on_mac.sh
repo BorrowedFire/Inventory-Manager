@@ -12,9 +12,11 @@ if [[ -z "$VERSION" || -z "$BUILD" ]]; then
 fi
 
 : "${DEVELOPER_ID_APPLICATION:?Set DEVELOPER_ID_APPLICATION, e.g. Developer ID Application: Example LLC (TEAMID)}"
-: "${APPLE_ID:?Set APPLE_ID for notarytool}"
-: "${APP_SPECIFIC_PASSWORD:?Set APP_SPECIFIC_PASSWORD for notarytool}"
-: "${TEAM_ID:?Set TEAM_ID for notarization}"
+if [[ -z "${NOTARYTOOL_PROFILE:-}" ]]; then
+  : "${APPLE_ID:?Set APPLE_ID for notarytool, or set NOTARYTOOL_PROFILE}"
+  : "${APP_SPECIFIC_PASSWORD:?Set APP_SPECIFIC_PASSWORD for notarytool, or set NOTARYTOOL_PROFILE}"
+  : "${TEAM_ID:?Set TEAM_ID for notarization, or set NOTARYTOOL_PROFILE}"
+fi
 
 cd "$ROOT"
 
@@ -32,7 +34,7 @@ PY
 Scripts/ci_check.sh
 Scripts/rehearse_sparkle_release.sh
 Scripts/notarize_release.sh
-Scripts/make_appcast.sh dist/InventoryManager-macOS.zip dist/appcast.xml
+VERSION="$VERSION" BUILD="$BUILD" Scripts/make_appcast.sh dist/InventoryManager-macOS.zip dist/appcast.xml
 
 TAG="v$VERSION"
 if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
