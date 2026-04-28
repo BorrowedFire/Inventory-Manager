@@ -3,6 +3,13 @@ import Combine
 
 @MainActor
 final class AppModel: ObservableObject {
+    private static let backupTimestampFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        return formatter
+    }()
+
     private static let standardItemTypes = [
         "AV",
         "Accessory",
@@ -469,17 +476,39 @@ final class AppModel: ObservableObject {
 
     func backupDatabase(to destinationURL: URL) async {
         do {
-            let databaseService = self.databaseService
-            try await retryingDatabaseCall { try databaseService.checkpointForBackup() }
-            let fileManager = FileManager.default
-            if fileManager.fileExists(atPath: destinationURL.path) {
-                try fileManager.removeItem(at: destinationURL)
-            }
-            try fileManager.copyItem(at: databaseURL, to: destinationURL)
+            try await writeDatabaseBackup(to: destinationURL)
             lastImportSummary = "Database backup saved to \(destinationURL.lastPathComponent)."
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    @discardableResult
+    func createPreUpdateBackup(reason: String = "app update") async throws -> URL {
+        let backupsDirectory = databaseURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("Backups", isDirectory: true)
+            .appendingPathComponent("Before Updates", isDirectory: true)
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0"
+        let timestamp = Self.backupTimestampFormatter.string(from: Date())
+        let destinationURL = backupsDirectory
+            .appendingPathComponent("InventoryData-pre-update-v\(version)-b\(build)-\(timestamp).sqlite")
+
+        try await writeDatabaseBackup(to: destinationURL)
+        lastImportSummary = "Pre-update backup saved: \(destinationURL.lastPathComponent)."
+        return destinationURL
+    }
+
+    private func writeDatabaseBackup(to destinationURL: URL) async throws {
+        let databaseService = self.databaseService
+        try await retryingDatabaseCall { try databaseService.checkpointForBackup() }
+        let fileManager = FileManager.default
+        try fileManager.createDirectory(at: destinationURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if fileManager.fileExists(atPath: destinationURL.path) {
+            try fileManager.removeItem(at: destinationURL)
+        }
+        try fileManager.copyItem(at: databaseURL, to: destinationURL)
     }
 
     func restoreDatabase(from sourceURL: URL) async {

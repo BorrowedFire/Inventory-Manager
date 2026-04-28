@@ -20,6 +20,16 @@ com.inventorymanager.app
 
 Only the public key is committed to the app. Keep the private key in Keychain or a password manager. Do not commit or paste the private key into the repository.
 
+## Database safety
+
+Before Sparkle relaunches or installs an update-on-quit, Inventory Manager creates an automatic SQLite backup under the current workspace database folder:
+
+```text
+Backups/Before Updates/InventoryData-pre-update-v<version>-b<build>-<timestamp>.sqlite
+```
+
+The backup is made after a SQLite checkpoint so the saved file is self-contained. If the backup fails, the update is paused instead of continuing without a safety copy.
+
 ## Release flow
 
 1. Build, Developer ID sign, and notarize the app.

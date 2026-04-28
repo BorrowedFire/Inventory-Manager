@@ -4,14 +4,20 @@ import Sparkle
 
 @main
 struct InventoryManagerApp: App {
-    @StateObject private var model = AppModel()
-    private let updaterController = SPUStandardUpdaterController(
-        startingUpdater: true,
-        updaterDelegate: nil,
-        userDriverDelegate: nil
-    )
+    @StateObject private var model: AppModel
+    private let updateBackupCoordinator: SparkleUpdateBackupCoordinator
+    private let updaterController: SPUStandardUpdaterController
 
     init() {
+        let appModel = AppModel()
+        let backupCoordinator = SparkleUpdateBackupCoordinator(model: appModel)
+        _model = StateObject(wrappedValue: appModel)
+        updateBackupCoordinator = backupCoordinator
+        updaterController = SPUStandardUpdaterController(
+            startingUpdater: true,
+            updaterDelegate: backupCoordinator,
+            userDriverDelegate: nil
+        )
         Self.applyBundledAppIcon()
     }
 
