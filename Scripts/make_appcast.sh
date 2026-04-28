@@ -6,7 +6,7 @@ DIST_DIR="$ROOT/dist"
 ZIP_PATH="${1:-$DIST_DIR/InventoryManager-macOS.zip}"
 APPCAST_PATH="${2:-$DIST_DIR/appcast.xml}"
 DOWNLOAD_URL="${DOWNLOAD_URL:-https://github.com/BorrowedFire/Inventory-Manager/releases/latest/download/InventoryManager-macOS.zip}"
-VERSION="${VERSION:-1.0.0}"
+VERSION="${VERSION:-0.1.0}"
 BUILD="${BUILD:-1}"
 PUB_DATE="${PUB_DATE:-$(LC_ALL=C date -u '+%a, %d %b %Y %H:%M:%S %z')}"
 
