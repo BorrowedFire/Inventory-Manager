@@ -6,10 +6,18 @@ BASE_VERSION="${BASE_VERSION:-0.1.0}"
 UPDATE_VERSION="${UPDATE_VERSION:-0.1.1}"
 BASE_BUILD="${BASE_BUILD:-1}"
 UPDATE_BUILD="${UPDATE_BUILD:-2}"
-PORT="${PORT:-18791}"
+PORT="${PORT:-$(/usr/bin/python3 - <<'PY'
+import socket
+s = socket.socket()
+s.bind(('127.0.0.1', 0))
+print(s.getsockname()[1])
+s.close()
+PY
+)}"
 WORK_DIR="${WORK_DIR:-$(mktemp -d /tmp/inventory-manager-sparkle-rehearsal.XXXXXX)}"
 SPARKLE_KEY_ACCOUNT="${SPARKLE_KEY_ACCOUNT:-com.inventorymanager.app}"
 SIGN_UPDATE_TIMEOUT_SECONDS="${SIGN_UPDATE_TIMEOUT_SECONDS:-45}"
+USE_TEMP_SPARKLE_KEY="${USE_TEMP_SPARKLE_KEY:-1}"
 PUBLIC_KEY="${PUBLIC_KEY:-EKjDkvxFSb8UmWYUG8dRZvOyNLMxWDSF95rEH9C3htY=}"
 APPCAST_URL="http://127.0.0.1:$PORT/appcast.xml"
 APP_NAME="Inventory Manager.app"
@@ -25,6 +33,25 @@ rsync -a --delete \
   "$ROOT/" "$WORK_DIR/source/"
 
 cd "$WORK_DIR/source"
+
+if [[ "$USE_TEMP_SPARKLE_KEY" == "1" ]]; then
+  cat > "$WORK_DIR/generate-ed-key.swift" <<'SWIFT'
+import Foundation
+import CryptoKit
+
+let privateKey = Curve25519.Signing.PrivateKey()
+print(Data(privateKey.rawRepresentation).base64EncodedString())
+print(Data(privateKey.publicKey.rawRepresentation).base64EncodedString())
+SWIFT
+  KEY_OUTPUT=$(swift "$WORK_DIR/generate-ed-key.swift")
+  PRIVATE_KEY=$(printf "%s\n" "$KEY_OUTPUT" | sed -n '1p')
+  PUBLIC_KEY=$(printf "%s\n" "$KEY_OUTPUT" | sed -n '2p')
+  printf "%s" "$PRIVATE_KEY" > "$WORK_DIR/sparkle-private-key.txt"
+  chmod 600 "$WORK_DIR/sparkle-private-key.txt"
+  echo "sparkle_key=temp"
+else
+  echo "sparkle_key=keychain:$SPARKLE_KEY_ACCOUNT"
+fi
 
 if ! command -v xcodegen >/dev/null 2>&1; then
   echo "error: xcodegen is required" >&2
@@ -109,7 +136,11 @@ if [[ -z "$SIGN_UPDATE" || ! -x "$SIGN_UPDATE" ]]; then
 fi
 
 set +e
-SIGNATURE_OUTPUT=$(perl -e 'alarm shift; exec @ARGV' "$SIGN_UPDATE_TIMEOUT_SECONDS" "$SIGN_UPDATE" --account "$SPARKLE_KEY_ACCOUNT" "$WORK_DIR/http/InventoryManager-macOS.zip" 2>&1)
+if [[ "$USE_TEMP_SPARKLE_KEY" == "1" ]]; then
+  SIGNATURE_OUTPUT=$(perl -e 'alarm shift; exec @ARGV' "$SIGN_UPDATE_TIMEOUT_SECONDS" "$SIGN_UPDATE" --ed-key-file "$WORK_DIR/sparkle-private-key.txt" "$WORK_DIR/http/InventoryManager-macOS.zip" 2>&1)
+else
+  SIGNATURE_OUTPUT=$(perl -e 'alarm shift; exec @ARGV' "$SIGN_UPDATE_TIMEOUT_SECONDS" "$SIGN_UPDATE" --account "$SPARKLE_KEY_ACCOUNT" "$WORK_DIR/http/InventoryManager-macOS.zip" 2>&1)
+fi
 SIGNATURE_STATUS=$?
 set -e
 if [[ "$SIGNATURE_STATUS" -ne 0 ]]; then
@@ -146,7 +177,7 @@ cat > "$WORK_DIR/http/appcast.xml" <<EOF
 </rss>
 EOF
 
-python3 -m http.server "$PORT" --directory "$WORK_DIR/http" >/tmp/inventory-manager-sparkle-http.log 2>&1 &
+/usr/bin/python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$WORK_DIR/http" >/tmp/inventory-manager-sparkle-http.log 2>&1 &
 SERVER_PID=$!
 trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
 sleep 1
@@ -155,10 +186,33 @@ curl -fsS "$APPCAST_URL" >/tmp/inventory-manager-appcast-check.xml
 curl -fsS "http://127.0.0.1:$PORT/InventoryManager-macOS.zip" -o /tmp/inventory-manager-update-check.zip
 cmp -s "$WORK_DIR/http/InventoryManager-macOS.zip" /tmp/inventory-manager-update-check.zip
 
+if [[ "$USE_TEMP_SPARKLE_KEY" == "1" ]]; then
+  "$SIGN_UPDATE" --verify --ed-key-file "$WORK_DIR/sparkle-private-key.txt" "$WORK_DIR/http/InventoryManager-macOS.zip" "$ED_SIGNATURE" >/tmp/inventory-manager-sparkle-verify.log 2>&1
+else
+  "$SIGN_UPDATE" --verify --account "$SPARKLE_KEY_ACCOUNT" "$WORK_DIR/http/InventoryManager-macOS.zip" "$ED_SIGNATURE" >/tmp/inventory-manager-sparkle-verify.log 2>&1
+fi
+
+DB_DIR="$WORK_DIR/db-fixture"
+BACKUP_DIR="$DB_DIR/Backups/Before Updates"
+DB_PATH="$DB_DIR/InventoryData.sqlite"
+mkdir -p "$DB_DIR" "$BACKUP_DIR"
+sqlite3 "$DB_PATH" <<'SQL'
+PRAGMA journal_mode=WAL;
+CREATE TABLE inventory_rehearsal(id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+INSERT INTO inventory_rehearsal(name) VALUES ('sample item before update');
+PRAGMA wal_checkpoint(TRUNCATE);
+SQL
+BACKUP_PATH="$BACKUP_DIR/InventoryData-pre-update-v$BASE_VERSION-b$BASE_BUILD-$(date -u '+%Y%m%d-%H%M%S').sqlite"
+cp "$DB_PATH" "$BACKUP_PATH"
+[[ "$(sqlite3 "$BACKUP_PATH" 'PRAGMA integrity_check;')" == "ok" ]]
+[[ "$(sqlite3 "$BACKUP_PATH" 'SELECT COUNT(*) FROM inventory_rehearsal;')" == "1" ]]
+
 echo "appcast_url=$APPCAST_URL"
 echo "base_app=$WORK_DIR/builds/base-$BASE_VERSION-b$BASE_BUILD/DerivedData/Build/Products/Release/$APP_NAME"
 echo "update_zip=$WORK_DIR/http/InventoryManager-macOS.zip"
 echo "appcast=$WORK_DIR/http/appcast.xml"
 echo "sparkle_signature=ok"
+echo "sparkle_signature_verify=ok"
 echo "download_check=ok"
+echo "pre_update_backup_fixture=ok"
 echo "rehearsal_artifacts=ok"
