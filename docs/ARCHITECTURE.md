@@ -24,3 +24,7 @@ Runtime databases, exports, packaged apps, and credentials must never be committ
 ## Distribution policy
 
 Local builds are signed ad hoc. Public/team builds should use Developer ID Application signing and notarization. Release binaries should not be published until the maintainer explicitly approves them.
+
+## Release-safety safeguards
+
+The app keeps import undo backups under `Backups/Before Imports`, pre-update backups under `Backups/Before Updates`, and records schema milestone `release_safety_backups_and_import_preview` for migration fixture coverage. The import preview UI is intentionally read-only before the destructive import step.

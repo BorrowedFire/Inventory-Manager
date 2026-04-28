@@ -233,6 +233,7 @@ struct AppUserRecord: Hashable, Sendable {
 }
 
 struct ImportPreview: Sendable {
+    let rows: [ImportPreviewRow]
     let inventoryNew: Int
     let inventoryUpdates: Int
     let inventoryUnchanged: Int
@@ -247,6 +248,18 @@ struct ImportPreview: Sendable {
 
     var summary: String {
         "Preview: \(inventoryNew) new inventory rows, \(inventoryUpdates) updates, \(inventoryUnchanged) unchanged; \(deploymentsNew) new deployments, \(deploymentsPossibleDuplicates) possible duplicates."
+    }
+}
+
+struct ImportPreviewRow: Identifiable, Hashable, Sendable {
+    let id = UUID()
+    let kind: String
+    let action: String
+    let identity: String
+    let detail: String
+
+    var isConflict: Bool {
+        action.localizedCaseInsensitiveContains("conflict") || action.localizedCaseInsensitiveContains("duplicate")
     }
 }
 

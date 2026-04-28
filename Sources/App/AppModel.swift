@@ -36,6 +36,7 @@ final class AppModel: ObservableObject {
         static let brandingReviewed = "workspace.brandingReviewed"
         static let databaseReviewed = "workspace.databaseReviewed"
         static let spreadsheetReviewed = "workspace.spreadsheetReviewed"
+        static let lastImportUndoBackupPath = "workspace.lastImportUndoBackupPath"
     }
 
     @Published var selectedSection: AppSection = .dashboard
@@ -72,6 +73,7 @@ final class AppModel: ObservableObject {
     @Published var lastImportSummary: String?
     @Published var importPreview: ImportPreview?
     @Published var backupRecords: [BackupRecord] = []
+    @Published var lastImportUndoBackupURL: URL?
     @Published var parsedImportItems: [ParsedImportItem] = []
     @Published var users: [AppUserRecord] = []
     @Published var annualBudgetRecords: [AnnualBudgetRecord] = []
@@ -90,6 +92,9 @@ final class AppModel: ObservableObject {
         self.databaseURL = databaseURL
         self.excelInventoryPath = defaults.string(forKey: DefaultsKey.excelInventoryPath) ?? ""
         self.databaseService = DatabaseService(databaseURL: databaseURL)
+        if let undoPath = defaults.string(forKey: DefaultsKey.lastImportUndoBackupPath), !undoPath.isEmpty {
+            self.lastImportUndoBackupURL = URL(fileURLWithPath: undoPath)
+        }
     }
 
     var filteredInventory: [InventoryItemRecord] {
@@ -430,12 +435,30 @@ final class AppModel: ObservableObject {
         }
 
         do {
+            let undoURL = try await createImportUndoBackup(label: "excel")
             let summary = try await syncExcel(force: true)
+            rememberImportUndoBackup(undoURL)
             lastImportSummary = "\(summary.inventoryImported) inventory imported, \(summary.inventoryUpdated) updated, \(summary.inventorySkipped) unchanged; \(summary.deploymentsImported) deployments imported, \(summary.deploymentsUpdated) updated, \(summary.deploymentsSkipped) unchanged."
             await load()
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    func undoLastImport() async {
+        guard let backupURL = lastImportUndoBackupURL else {
+            errorMessage = "No import undo backup is available."
+            return
+        }
+        guard FileManager.default.fileExists(atPath: backupURL.path) else {
+            errorMessage = "The last import undo backup could not be found."
+            return
+        }
+
+        await restoreDatabase(from: backupURL)
+        defaults.removeObject(forKey: DefaultsKey.lastImportUndoBackupPath)
+        lastImportUndoBackupURL = nil
+        lastImportSummary = "Last import undone by restoring \(backupURL.lastPathComponent)."
     }
 
     func previewExcelImport() async {
@@ -508,6 +531,25 @@ final class AppModel: ObservableObject {
     }
 
     @discardableResult
+    private func createImportUndoBackup(label: String) async throws -> URL {
+        let backupsDirectory = databaseURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("Backups", isDirectory: true)
+            .appendingPathComponent("Before Imports", isDirectory: true)
+        let timestamp = Self.backupTimestampFormatter.string(from: Date())
+        let destinationURL = backupsDirectory
+            .appendingPathComponent("InventoryData-before-\(label)-import-\(timestamp).sqlite")
+        try await writeDatabaseBackup(to: destinationURL)
+        return destinationURL
+    }
+
+    private func rememberImportUndoBackup(_ url: URL) {
+        lastImportUndoBackupURL = url
+        defaults.set(url.path, forKey: DefaultsKey.lastImportUndoBackupPath)
+        refreshBackupRecords()
+    }
+
+    @discardableResult
     func createPreUpdateBackup(reason: String = "app update") async throws -> URL {
         let backupsDirectory = databaseURL
             .deletingLastPathComponent()
@@ -557,6 +599,16 @@ final class AppModel: ObservableObject {
         backupRecords = recordsByPath.values.sorted {
             ($0.modifiedAt ?? .distantPast) > ($1.modifiedAt ?? .distantPast)
         }
+    }
+
+    func pruneOldBackups(keeping keepCount: Int = 20) {
+        refreshBackupRecords()
+        let removable = backupRecords.dropFirst(max(keepCount, 0))
+        for backup in removable {
+            try? FileManager.default.removeItem(at: backup.url)
+        }
+        refreshBackupRecords()
+        lastImportSummary = removable.isEmpty ? "No old backups to prune." : "Pruned \(removable.count) old backup(s)."
     }
 
     func restoreBackup(_ backup: BackupRecord) async {
@@ -613,20 +665,17 @@ final class AppModel: ObservableObject {
         isLoading = true
         defer { isLoading = false }
 
-        do {
-            let parser = pdfImportService
-            parsedImportItems = try await Task.detached(priority: .userInitiated) {
-                parser.parse(urls: urls)
-            }.value
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+        let parser = pdfImportService
+        parsedImportItems = await Task.detached(priority: .userInitiated) {
+            parser.parse(urls: urls)
+        }.value
     }
 
     func saveParsedItems() async {
         guard !parsedImportItems.isEmpty else { return }
 
         do {
+            let undoURL = try await createImportUndoBackup(label: "pdf")
             let itemsToSave = parsedImportItems
             let databaseService = self.databaseService
             let result = try await retryingDatabaseCall { try databaseService.insertParsedItems(itemsToSave) }
@@ -645,6 +694,7 @@ final class AppModel: ObservableObject {
             } else {
                 lastImportSummary = "Saved \(insertedCount) parsed PDF item(s) into inventory."
             }
+            rememberImportUndoBackup(undoURL)
             parsedImportItems = []
             await load()
         } catch {
@@ -881,6 +931,7 @@ final class AppModel: ObservableObject {
         }
         let currentDeployments = Set(deploymentsInWorkspaceKeys())
 
+        var rows: [ImportPreviewRow] = []
         var inventoryNew = 0
         var inventoryUpdates = 0
         var inventoryUnchanged = 0
@@ -892,10 +943,12 @@ final class AppModel: ObservableObject {
             seenInventoryKeys[key, default: 0] += 1
             if seenInventoryKeys[key, default: 0] > 1 {
                 inventoryConflicts.append("Duplicate incoming inventory row: \(item.partNumber) / \(item.poNumber)")
+                rows.append(ImportPreviewRow(kind: "Inventory", action: "Conflict", identity: item.partNumber, detail: "Duplicate incoming row for PO \(item.poNumber)"))
             }
 
             guard let existing = currentInventoryByKey[key]?.first else {
                 inventoryNew += 1
+                rows.append(ImportPreviewRow(kind: "Inventory", action: "Add", identity: item.partNumber, detail: "\(item.description) · qty \(item.quantity)"))
                 continue
             }
 
@@ -907,8 +960,10 @@ final class AppModel: ObservableObject {
                 abs(existing.unitCost - item.unitCost) > 0.005
             if changed {
                 inventoryUpdates += 1
+                rows.append(ImportPreviewRow(kind: "Inventory", action: "Update", identity: item.partNumber, detail: "Existing row will be refreshed from workbook."))
             } else {
                 inventoryUnchanged += 1
+                rows.append(ImportPreviewRow(kind: "Inventory", action: "Skip", identity: item.partNumber, detail: "No workbook changes detected."))
             }
         }
 
@@ -921,15 +976,19 @@ final class AppModel: ObservableObject {
             seenDeploymentKeys[key, default: 0] += 1
             if seenDeploymentKeys[key, default: 0] > 1 {
                 deploymentConflicts.append("Duplicate incoming deployment: \(deployment.partNumber) to \(deployment.deployedTo) on \(deployment.deployedDate)")
+                rows.append(ImportPreviewRow(kind: "Deployment", action: "Conflict", identity: deployment.partNumber, detail: "Duplicate incoming deployment for \(deployment.deployedTo)."))
             }
             if currentDeployments.contains(key) {
                 deploymentsPossibleDuplicates += 1
+                rows.append(ImportPreviewRow(kind: "Deployment", action: "Possible duplicate", identity: deployment.partNumber, detail: "\(deployment.deployedTo) · \(deployment.deployedDate)"))
             } else {
                 deploymentsNew += 1
+                rows.append(ImportPreviewRow(kind: "Deployment", action: "Add", identity: deployment.partNumber, detail: "\(deployment.deployedTo) · qty \(deployment.qtyDeployed)"))
             }
         }
 
         return ImportPreview(
+            rows: rows,
             inventoryNew: inventoryNew,
             inventoryUpdates: inventoryUpdates,
             inventoryUnchanged: inventoryUnchanged,

@@ -219,7 +219,8 @@ final class DatabaseService: @unchecked Sendable {
             INSERT OR IGNORE INTO schema_migrations(version, name) VALUES
               (1, 'initial_public_schema'),
               (2, 'transactional_imports_and_inventory_constraints'),
-              (3, 'native_mac_product_polish');
+              (3, 'native_mac_product_polish'),
+              (4, 'release_safety_backups_and_import_preview');
             """
             guard sqlite3_exec(db, migrationSQL, nil, nil, nil) == SQLITE_OK else {
                 throw DatabaseError.stepFailed(lastMessage(from: db))

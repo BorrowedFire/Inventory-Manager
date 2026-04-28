@@ -13,7 +13,7 @@ final class SparkleUpdateBackupCoordinator: NSObject, SPUUpdaterDelegate {
     func updater(
         _ updater: SPUUpdater,
         shouldPostponeRelaunchForUpdate item: SUAppcastItem,
-        untilInvoking installHandler: @escaping () -> Void
+        untilInvokingBlock installHandler: @escaping () -> Void
     ) -> Bool {
         guard !backupInProgress else { return false }
         backupInProgress = true

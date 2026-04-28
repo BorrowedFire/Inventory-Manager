@@ -2,6 +2,23 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
+private final class PDFDropCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var urls: [URL] = []
+
+    func append(_ url: URL) {
+        lock.lock()
+        urls.append(url)
+        lock.unlock()
+    }
+
+    func snapshot() -> [URL] {
+        lock.lock()
+        defer { lock.unlock() }
+        return urls
+    }
+}
+
 struct MainView: View {
     @ObservedObject var model: AppModel
     @State private var inventoryEditorItem: InventoryItemRecord?
@@ -770,8 +787,7 @@ struct MainView: View {
         guard !pdfProviders.isEmpty else { return false }
 
         let group = DispatchGroup()
-        let queue = DispatchQueue(label: "com.inventorymanager.pdf-drop")
-        var urls: [URL] = []
+        let collector = PDFDropCollector()
 
         for provider in pdfProviders {
             group.enter()
@@ -786,7 +802,7 @@ struct MainView: View {
                         try FileManager.default.removeItem(at: destination)
                     }
                     try FileManager.default.copyItem(at: url, to: destination)
-                    queue.sync { urls.append(destination) }
+                    collector.append(destination)
                 } catch {
                     DispatchQueue.main.async {
                         model.errorMessage = error.localizedDescription
@@ -796,7 +812,7 @@ struct MainView: View {
         }
 
         group.notify(queue: .main) {
-            Task { await model.parsePDFs(urls: urls) }
+            Task { await model.parsePDFs(urls: collector.snapshot()) }
         }
         return true
     }
@@ -888,28 +904,7 @@ struct MainView: View {
                     }
                 }
 
-                if !model.backupRecords.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Recent Backups")
-                            .font(.headline)
-                        ForEach(model.backupRecords.prefix(5)) { backup in
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(backup.name)
-                                        .font(.subheadline.weight(.medium))
-                                    Text("\(backup.displayDate) · \(backup.displaySize)")
-                                        .font(.caption)
-                                        .foregroundStyle(AppTheme.muted)
-                                }
-                                Spacer()
-                                Button("Reveal") { FileDialogs.revealInFinder(backup.url) }
-                                Button("Restore") { Task { await model.restoreBackup(backup) } }
-                            }
-                            .padding(10)
-                            .background(Color.white.opacity(0.55), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        }
-                    }
-                }
+                BackupBrowserView(model: model, limit: 5)
 
                 Divider()
 
@@ -960,19 +955,7 @@ struct MainView: View {
                 }
 
                 if let preview = model.importPreview {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Import Preview")
-                            .font(.headline)
-                        Text(preview.summary)
-                            .foregroundStyle(AppTheme.muted)
-                        ForEach((preview.inventoryConflicts + preview.deploymentConflicts), id: \.self) { conflict in
-                            Text(conflict)
-                                .font(.caption)
-                                .foregroundStyle(.orange)
-                        }
-                    }
-                    .padding(12)
-                    .background(AppTheme.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    ImportPreviewPanel(preview: preview)
                 }
 
                 Divider()
@@ -988,6 +971,10 @@ struct MainView: View {
                     Button("Remove Duplicates") {
                         Task { await model.removeDuplicateInventoryItems() }
                     }
+                    Button("Undo Last Import") {
+                        Task { await model.undoLastImport() }
+                    }
+                    .disabled(model.lastImportUndoBackupURL == nil)
                 }
 
                 if let lastImportSummary = model.lastImportSummary {
@@ -2002,7 +1989,9 @@ enum InstallHelper {
     static func relaunchApplication(at url: URL) {
         let configuration = NSWorkspace.OpenConfiguration()
         NSWorkspace.shared.openApplication(at: url, configuration: configuration) { _, _ in
-            NSApplication.shared.terminate(nil)
+            Task { @MainActor in
+                NSApplication.shared.terminate(nil)
+            }
         }
     }
 

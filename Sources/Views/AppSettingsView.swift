@@ -56,28 +56,7 @@ struct AppSettingsView: View {
             }
 
             Section("Backups") {
-                if model.backupRecords.isEmpty {
-                    Text("No backup files found next to this workspace yet.")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(model.backupRecords.prefix(8)) { backup in
-                        HStack {
-                            VStack(alignment: .leading) {
-                                Text(backup.name)
-                                Text("\(backup.displayDate) · \(backup.displaySize)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Button("Reveal") {
-                                FileDialogs.revealInFinder(backup.url)
-                            }
-                            Button("Restore") {
-                                Task { await model.restoreBackup(backup) }
-                            }
-                        }
-                    }
-                }
+                BackupBrowserView(model: model)
             }
 
             Section("Spreadsheet Sync") {
@@ -98,6 +77,10 @@ struct AppSettingsView: View {
                         Task { await model.importFromExcel() }
                     }
                     .disabled(model.excelInventoryPath.isEmpty)
+                    Button("Undo Last Import") {
+                        Task { await model.undoLastImport() }
+                    }
+                    .disabled(model.lastImportUndoBackupURL == nil)
                     Button("Preview") {
                         Task { await model.previewExcelImport() }
                     }
@@ -111,14 +94,7 @@ struct AppSettingsView: View {
 
             if let preview = model.importPreview {
                 Section("Import Preview") {
-                    Text(preview.summary)
-                    if preview.hasConflicts {
-                        ForEach((preview.inventoryConflicts + preview.deploymentConflicts), id: \.self) { conflict in
-                            Text(conflict)
-                                .font(.caption)
-                                .foregroundStyle(.orange)
-                        }
-                    }
+                    ImportPreviewPanel(preview: preview)
                 }
             }
 

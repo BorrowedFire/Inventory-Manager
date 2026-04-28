@@ -24,6 +24,7 @@ struct MigrationSmokeRunner {
         let migrations = try service.schemaMigrationNames()
         precondition(migrations.contains("initial_public_schema"), "missing initial schema migration")
         precondition(migrations.contains("native_mac_product_polish"), "missing native polish migration")
+        precondition(migrations.contains("release_safety_backups_and_import_preview"), "missing release safety migration")
 
         print("migration_smoke=ok")
     }
