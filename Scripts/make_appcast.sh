@@ -18,10 +18,15 @@ fi
 
 SPARKLE_BIN="${SPARKLE_BIN:-}"
 if [[ -z "$SPARKLE_BIN" ]]; then
-  SPARKLE_BIN=$(find "$HOME/Library/Developer/Xcode/DerivedData" -path '*/SourcePackages/artifacts/sparkle/Sparkle/bin/sign_update' -type f 2>/dev/null | head -1 || true)
+  SPARKLE_BIN=$(find \
+    "$ROOT/.build" \
+    "$ROOT/build" \
+    "$HOME/Library/Developer/Xcode/DerivedData" \
+    -path '*/SourcePackages/artifacts/sparkle/Sparkle/bin/sign_update' \
+    -type f 2>/dev/null | head -1 || true)
 fi
 if [[ -z "$SPARKLE_BIN" || ! -x "$SPARKLE_BIN" ]]; then
-  echo "error: Sparkle sign_update tool not found. Build once after adding Sparkle, then rerun." >&2
+  echo "error: Sparkle sign_update tool not found. Resolve packages or build once after adding Sparkle, then rerun." >&2
   exit 1
 fi
 

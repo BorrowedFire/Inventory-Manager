@@ -32,7 +32,7 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         SUEnableInstallerLauncherService: true
         SUFeedURL: https://github.com/BorrowedFire/Inventory-Manager/releases/latest/download/appcast.xml
-        SUPublicEDKey: fK6EUDYoikcfM5oPpGUtSUlThlhTqdECtQTBwCoLqww=
+        SUPublicEDKey: EKjDkvxFSb8UmWYUG8dRZvOyNLMxWDSF95rEH9C3htY=
     sources:
       - Sources
       - path: Resources/Assets.xcassets
