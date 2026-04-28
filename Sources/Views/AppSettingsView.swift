@@ -49,6 +49,34 @@ struct AppSettingsView: View {
                         Task { await model.loadDemoWorkspace() }
                     }
                     .disabled(!model.isWorkspaceEmpty)
+                    Button("Refresh Backups") {
+                        model.refreshBackupRecords()
+                    }
+                }
+            }
+
+            Section("Backups") {
+                if model.backupRecords.isEmpty {
+                    Text("No backup files found next to this workspace yet.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(model.backupRecords.prefix(8)) { backup in
+                        HStack {
+                            VStack(alignment: .leading) {
+                                Text(backup.name)
+                                Text("\(backup.displayDate) · \(backup.displaySize)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button("Reveal") {
+                                FileDialogs.revealInFinder(backup.url)
+                            }
+                            Button("Restore") {
+                                Task { await model.restoreBackup(backup) }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -70,10 +98,27 @@ struct AppSettingsView: View {
                         Task { await model.importFromExcel() }
                     }
                     .disabled(model.excelInventoryPath.isEmpty)
+                    Button("Preview") {
+                        Task { await model.previewExcelImport() }
+                    }
+                    .disabled(model.excelInventoryPath.isEmpty)
                     Button("Clear") {
                         model.clearExcelInventoryPath()
                     }
                     .disabled(model.excelInventoryPath.isEmpty)
+                }
+            }
+
+            if let preview = model.importPreview {
+                Section("Import Preview") {
+                    Text(preview.summary)
+                    if preview.hasConflicts {
+                        ForEach((preview.inventoryConflicts + preview.deploymentConflicts), id: \.self) { conflict in
+                            Text(conflict)
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        }
+                    }
                 }
             }
 

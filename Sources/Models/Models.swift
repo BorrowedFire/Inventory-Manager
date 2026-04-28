@@ -232,6 +232,41 @@ struct AppUserRecord: Hashable, Sendable {
     let displayName: String
 }
 
+struct ImportPreview: Sendable {
+    let inventoryNew: Int
+    let inventoryUpdates: Int
+    let inventoryUnchanged: Int
+    let inventoryConflicts: [String]
+    let deploymentsNew: Int
+    let deploymentsPossibleDuplicates: Int
+    let deploymentConflicts: [String]
+
+    var hasConflicts: Bool {
+        !inventoryConflicts.isEmpty || !deploymentConflicts.isEmpty
+    }
+
+    var summary: String {
+        "Preview: \(inventoryNew) new inventory rows, \(inventoryUpdates) updates, \(inventoryUnchanged) unchanged; \(deploymentsNew) new deployments, \(deploymentsPossibleDuplicates) possible duplicates."
+    }
+}
+
+struct BackupRecord: Identifiable, Hashable, Sendable {
+    let id: String
+    let url: URL
+    let name: String
+    let sizeBytes: Int64
+    let modifiedAt: Date?
+
+    var displaySize: String {
+        ByteCountFormatter.string(fromByteCount: sizeBytes, countStyle: .file)
+    }
+
+    var displayDate: String {
+        guard let modifiedAt else { return "Unknown date" }
+        return modifiedAt.formatted(date: .abbreviated, time: .shortened)
+    }
+}
+
 struct StockroomDraft: Identifiable, Hashable, Sendable {
     let id: Int64?
     var name: String

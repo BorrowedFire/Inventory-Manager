@@ -70,6 +70,8 @@ final class AppModel: ObservableObject {
     @Published var selectedStockroomID: Int64?
     @Published var excelInventoryPath: String
     @Published var lastImportSummary: String?
+    @Published var importPreview: ImportPreview?
+    @Published var backupRecords: [BackupRecord] = []
     @Published var parsedImportItems: [ParsedImportItem] = []
     @Published var users: [AppUserRecord] = []
     @Published var annualBudgetRecords: [AnnualBudgetRecord] = []
@@ -285,6 +287,7 @@ final class AppModel: ObservableObject {
             currentUser = try await retryingDatabaseCall { try databaseService.currentUser() }
             users = try await retryingDatabaseCall { try databaseService.users() }
             annualBudgetRecords = budgetRecords(from: budgetDashboard)
+            refreshBackupRecords()
 
             if selectedInventoryID == nil {
                 selectedInventoryID = inventory.first?.id
@@ -435,6 +438,26 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func previewExcelImport() async {
+        guard !excelInventoryPath.isEmpty else {
+            errorMessage = "Choose an Excel inventory file first."
+            return
+        }
+
+        do {
+            let excelService = excelSyncService
+            let excelPath = excelInventoryPath
+            let workbook = try await Task.detached(priority: .userInitiated) {
+                try excelService.readWorkbook(at: excelPath)
+            }.value
+            let preview = buildImportPreview(inventoryItems: workbook.0, deployments: workbook.1)
+            importPreview = preview
+            lastImportSummary = preview.summary
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func removeDuplicateInventoryItems() async {
         do {
             let databaseService = self.databaseService
@@ -478,6 +501,7 @@ final class AppModel: ObservableObject {
         do {
             try await writeDatabaseBackup(to: destinationURL)
             lastImportSummary = "Database backup saved to \(destinationURL.lastPathComponent)."
+            refreshBackupRecords()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -497,7 +521,47 @@ final class AppModel: ObservableObject {
 
         try await writeDatabaseBackup(to: destinationURL)
         lastImportSummary = "Pre-update backup saved: \(destinationURL.lastPathComponent)."
+        refreshBackupRecords()
         return destinationURL
+    }
+
+    func refreshBackupRecords() {
+        let fileManager = FileManager.default
+        let backupRoots = [
+            databaseURL.deletingLastPathComponent(),
+            databaseURL.deletingLastPathComponent().appendingPathComponent("Backups", isDirectory: true),
+            databaseURL.deletingLastPathComponent().appendingPathComponent("Backups", isDirectory: true).appendingPathComponent("Before Updates", isDirectory: true)
+        ]
+
+        var recordsByPath: [String: BackupRecord] = [:]
+        for root in backupRoots {
+            guard let urls = try? fileManager.contentsOfDirectory(
+                at: root,
+                includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            ) else { continue }
+
+            for url in urls where url.pathExtension.lowercased() == "sqlite" && url.path != databaseURL.path {
+                let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey])
+                guard values?.isRegularFile != false else { continue }
+                recordsByPath[url.path] = BackupRecord(
+                    id: url.path,
+                    url: url,
+                    name: url.lastPathComponent,
+                    sizeBytes: Int64(values?.fileSize ?? 0),
+                    modifiedAt: values?.contentModificationDate
+                )
+            }
+        }
+
+        backupRecords = recordsByPath.values.sorted {
+            ($0.modifiedAt ?? .distantPast) > ($1.modifiedAt ?? .distantPast)
+        }
+    }
+
+    func restoreBackup(_ backup: BackupRecord) async {
+        await restoreDatabase(from: backup.url)
+        refreshBackupRecords()
     }
 
     private func writeDatabaseBackup(to destinationURL: URL) async throws {
@@ -809,6 +873,93 @@ final class AppModel: ObservableObject {
         let timestamp = values?.contentModificationDate?.timeIntervalSince1970 ?? 0
         let size = values?.fileSize ?? 0
         return "\(url.path)|\(timestamp)|\(size)"
+    }
+
+    private func buildImportPreview(inventoryItems: [ImportedInventoryItem], deployments: [ImportedDeployment]) -> ImportPreview {
+        let currentInventoryByKey = Dictionary(grouping: inventory) { item in
+            importIdentity(partNumber: item.partNumber, poNumber: item.poNumber, budgetType: item.budgetType)
+        }
+        let currentDeployments = Set(deploymentsInWorkspaceKeys())
+
+        var inventoryNew = 0
+        var inventoryUpdates = 0
+        var inventoryUnchanged = 0
+        var inventoryConflicts: [String] = []
+        var seenInventoryKeys: [String: Int] = [:]
+
+        for item in inventoryItems {
+            let key = importIdentity(partNumber: item.partNumber, poNumber: item.poNumber, budgetType: item.budgetType)
+            seenInventoryKeys[key, default: 0] += 1
+            if seenInventoryKeys[key, default: 0] > 1 {
+                inventoryConflicts.append("Duplicate incoming inventory row: \(item.partNumber) / \(item.poNumber)")
+            }
+
+            guard let existing = currentInventoryByKey[key]?.first else {
+                inventoryNew += 1
+                continue
+            }
+
+            let changed = existing.description != item.description ||
+                existing.manufacturer != item.manufacturer ||
+                existing.vendor != item.vendor ||
+                existing.quantity != item.quantity ||
+                existing.qtyReceived != item.qtyReceived ||
+                abs(existing.unitCost - item.unitCost) > 0.005
+            if changed {
+                inventoryUpdates += 1
+            } else {
+                inventoryUnchanged += 1
+            }
+        }
+
+        var deploymentsNew = 0
+        var deploymentsPossibleDuplicates = 0
+        var deploymentConflicts: [String] = []
+        var seenDeploymentKeys: [String: Int] = [:]
+        for deployment in deployments {
+            let key = deploymentIdentity(deployment)
+            seenDeploymentKeys[key, default: 0] += 1
+            if seenDeploymentKeys[key, default: 0] > 1 {
+                deploymentConflicts.append("Duplicate incoming deployment: \(deployment.partNumber) to \(deployment.deployedTo) on \(deployment.deployedDate)")
+            }
+            if currentDeployments.contains(key) {
+                deploymentsPossibleDuplicates += 1
+            } else {
+                deploymentsNew += 1
+            }
+        }
+
+        return ImportPreview(
+            inventoryNew: inventoryNew,
+            inventoryUpdates: inventoryUpdates,
+            inventoryUnchanged: inventoryUnchanged,
+            inventoryConflicts: Array(inventoryConflicts.prefix(8)),
+            deploymentsNew: deploymentsNew,
+            deploymentsPossibleDuplicates: deploymentsPossibleDuplicates,
+            deploymentConflicts: Array(deploymentConflicts.prefix(8))
+        )
+    }
+
+    private func deploymentsInWorkspaceKeys() -> [String] {
+        deployments.map { deployment in
+            [deployment.partNumber, deployment.deployedTo, deployment.deployedDate, String(deployment.qtyDeployed)]
+                .map(normalizedImportValue)
+                .joined(separator: "|")
+        }
+    }
+
+    private func deploymentIdentity(_ deployment: ImportedDeployment) -> String {
+        [deployment.partNumber, deployment.deployedTo, deployment.deployedDate, String(deployment.qtyDeployed)]
+            .map(normalizedImportValue)
+            .joined(separator: "|")
+    }
+
+    private func importIdentity(partNumber: String, poNumber: String, budgetType: String) -> String {
+        [partNumber, poNumber, budgetType].map(normalizedImportValue).joined(separator: "|")
+    }
+
+    private func normalizedImportValue(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
     private func persistExcelSyncMarker() {

@@ -1568,6 +1568,11 @@ final class DatabaseService: @unchecked Sendable {
         )
     }
 
+    func schemaMigrationNames() throws -> [String] {
+        try query("SELECT name FROM schema_migrations ORDER BY version ASC")
+            .map { $0.string(named: "name") }
+    }
+
     private func singleInt(_ sql: String) throws -> Int {
         try singleRow(sql).int(at: 0)
     }

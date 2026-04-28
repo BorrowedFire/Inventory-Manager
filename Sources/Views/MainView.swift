@@ -883,6 +883,32 @@ struct MainView: View {
                         Task { await model.loadDemoWorkspace() }
                     }
                     .disabled(!model.isWorkspaceEmpty)
+                    Button("Refresh Backups") {
+                        model.refreshBackupRecords()
+                    }
+                }
+
+                if !model.backupRecords.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Recent Backups")
+                            .font(.headline)
+                        ForEach(model.backupRecords.prefix(5)) { backup in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(backup.name)
+                                        .font(.subheadline.weight(.medium))
+                                    Text("\(backup.displayDate) · \(backup.displaySize)")
+                                        .font(.caption)
+                                        .foregroundStyle(AppTheme.muted)
+                                }
+                                Spacer()
+                                Button("Reveal") { FileDialogs.revealInFinder(backup.url) }
+                                Button("Restore") { Task { await model.restoreBackup(backup) } }
+                            }
+                            .padding(10)
+                            .background(Color.white.opacity(0.55), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        }
+                    }
                 }
 
                 Divider()
@@ -902,6 +928,10 @@ struct MainView: View {
                         }
                         Button("Import from Excel") {
                             Task { await model.importFromExcel() }
+                        }
+                        .disabled(model.excelInventoryPath.isEmpty)
+                        Button("Preview Import") {
+                            Task { await model.previewExcelImport() }
                         }
                         .disabled(model.excelInventoryPath.isEmpty)
                         Button("Sync Remaining") {
@@ -927,6 +957,22 @@ struct MainView: View {
                             }
                         }
                     }
+                }
+
+                if let preview = model.importPreview {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Import Preview")
+                            .font(.headline)
+                        Text(preview.summary)
+                            .foregroundStyle(AppTheme.muted)
+                        ForEach((preview.inventoryConflicts + preview.deploymentConflicts), id: \.self) { conflict in
+                            Text(conflict)
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                    .padding(12)
+                    .background(AppTheme.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
 
                 Divider()
