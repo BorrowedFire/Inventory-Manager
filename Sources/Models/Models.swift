@@ -5,7 +5,7 @@ enum AppSection: String, CaseIterable, Identifiable {
     case budgets = "Budgets"
     case inventory = "Inventory"
     case deployments = "Deployments"
-    case importPDFs = "Import PDFs"
+    case importPDFs = "PDF Import"
     case stockrooms = "Stockrooms"
     case settings = "Settings"
 
@@ -30,8 +30,8 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .inventory: "Inventory Ledger"
         case .deployments: "Deployment History"
         case .importPDFs: "Import Workflow"
-        case .stockrooms: "Room Access"
-        case .settings: "Configuration"
+        case .stockrooms: "Stockroom Management"
+        case .settings: "Workspace Settings"
         }
     }
 }
@@ -77,6 +77,14 @@ enum DeploymentSortOption: String, CaseIterable, Identifiable, Sendable {
     case deployedBy = "Deployed By"
     case location = "Location"
     case quantityHigh = "Qty"
+
+    var id: String { rawValue }
+}
+
+enum DeploymentStatusFilter: String, CaseIterable, Identifiable, Sendable {
+    case all = "All Deployments"
+    case active = "Active"
+    case returned = "Returned"
 
     var id: String { rawValue }
 }
@@ -213,6 +221,11 @@ struct DeploymentRecord: Identifiable, Hashable, Sendable {
     let qtyDeployed: Int
     let stockroomName: String
     let notes: String
+    let returnedAt: String
+    let returnedBy: String
+
+    var isReturned: Bool { !returnedAt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    var statusLabel: String { isReturned ? "Returned" : "Active" }
 }
 
 struct StockroomRecord: Identifiable, Hashable, Sendable {
@@ -309,6 +322,7 @@ struct ParsedImportItem: Identifiable, Hashable, Sendable {
     var poNumber: String
     var notes: String
     var budgetType: String
+    var stockroomId: Int64? = nil
 }
 
 struct WorkspaceChecklistItem: Identifiable, Hashable, Sendable {

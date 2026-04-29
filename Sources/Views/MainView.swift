@@ -22,14 +22,19 @@ private final class PDFDropCollector: @unchecked Sendable {
 struct MainView: View {
     @ObservedObject var model: AppModel
     @State private var inventoryEditorItem: InventoryItemRecord?
+    @State private var inventoryToDelete: InventoryItemRecord?
     @State private var deploymentToReturn: DeploymentRecord?
+    @State private var deploymentToDelete: DeploymentRecord?
     @State private var deploymentDraft: DeploymentSheetModel?
     @State private var stockroomDraft: StockroomDraft?
     @State private var stockroomToDelete: StockroomRecord?
+    @State private var budgetToDelete: AnnualBudgetRecord?
+    @State private var databaseToRestore: URL?
     @State private var showOnboarding = false
     @State private var showInstallGuide = false
     @State private var budgetCategoryTypeSelection = "Capital"
     @State private var budgetYearDraft = ""
+    @State private var confirmClearParsedPDFs = false
 
     var body: some View {
         NavigationSplitView {
@@ -76,6 +81,18 @@ struct MainView: View {
             showInstallGuide = InstallHelper.shouldPromptForApplicationsInstall
             showOnboarding = model.shouldPresentOnboarding && !showInstallGuide
         }
+        .onChange(of: model.commandRequestID) { _ in
+            switch model.commandRequest {
+            case .newInventoryItem:
+                inventoryEditorItem = AppModel.blankInventoryItem(stockroomId: model.selectedStockroomID)
+                model.selectedSection = .inventory
+            case .createStockroom:
+                stockroomDraft = StockroomDraft()
+                model.selectedSection = .stockrooms
+            case .none:
+                break
+            }
+        }
         .sheet(isPresented: $showInstallGuide, onDismiss: {
             showOnboarding = model.shouldPresentOnboarding
         }) {
@@ -100,7 +117,11 @@ struct MainView: View {
                 itemTypeOptions: model.editableItemTypeOptions
             ) { updatedItem in
                 Task {
-                    await model.saveInventory(updatedItem, originalItem: item)
+                    if item.id == 0 {
+                        await model.createInventory(updatedItem)
+                    } else {
+                        await model.saveInventory(updatedItem, originalItem: item)
+                    }
                     inventoryEditorItem = nil
                 }
             }
@@ -151,6 +172,25 @@ struct MainView: View {
             )
         }
         .confirmationDialog(
+            "Delete inventory item?",
+            isPresented: Binding(
+                get: { inventoryToDelete != nil },
+                set: { if !$0 { inventoryToDelete = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete Inventory Item", role: .destructive) {
+                guard let item = inventoryToDelete else { return }
+                Task {
+                    await model.deleteInventoryItem(id: item.id)
+                    inventoryToDelete = nil
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes the inventory row and any deployment rows linked to it.")
+        }
+        .confirmationDialog(
             "Delete stockroom?",
             isPresented: Binding(
                 get: { stockroomToDelete != nil },
@@ -168,6 +208,44 @@ struct MainView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Items in this stockroom will become unassigned.")
+        }
+        .confirmationDialog(
+            "Delete saved budget?",
+            isPresented: Binding(
+                get: { budgetToDelete != nil },
+                set: { if !$0 { budgetToDelete = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete Budget", role: .destructive) {
+                guard let budget = budgetToDelete else { return }
+                Task {
+                    await model.deleteAnnualBudget(record: budget)
+                    budgetToDelete = nil
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(budgetToDelete.map { "Remove the saved \($0.year) \($0.budgetType) budget target." } ?? "")
+        }
+        .confirmationDialog(
+            "Restore database?",
+            isPresented: Binding(
+                get: { databaseToRestore != nil },
+                set: { if !$0 { databaseToRestore = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Restore Database", role: .destructive) {
+                guard let url = databaseToRestore else { return }
+                Task {
+                    await model.restoreDatabase(from: url)
+                    databaseToRestore = nil
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(databaseToRestore.map { "Replace the current database with \($0.lastPathComponent). The current database will be backed up first." } ?? "")
         }
     }
 
@@ -222,7 +300,7 @@ struct MainView: View {
 
     private var dashboardView: some View {
         SectionShell(
-            title: "Operational inventory at a glance",
+            title: "Inventory at a glance",
             eyebrow: AppSection.dashboard.eyebrow,
             subtitle: nil
         ) {
@@ -245,7 +323,7 @@ struct MainView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     panelHeading(
                         title: "Budget Status",
-                        subtitle: "Annual plan vs actual spend."
+                        subtitle: "Annual budget vs. actual spend."
                     )
                     ForEach(model.budgetDashboard.annualSummaries.prefix(4)) { budget in
                         Button {
@@ -262,7 +340,7 @@ struct MainView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     panelHeading(
                         title: "Top Vendors",
-                        subtitle: "Spend concentration by supplier."
+                        subtitle: "Spend by supplier."
                     )
                     ForEach(Array(model.dashboard.vendors.enumerated()), id: \.element.id) { index, vendor in
                         Button {
@@ -304,7 +382,7 @@ struct MainView: View {
             VStack(alignment: .leading, spacing: 16) {
                 panelHeading(
                     title: "Budget Dashboard",
-                    subtitle: "CapEx and OpEx by year with remaining balance and status."
+                    subtitle: "Capital and OpEx by year with remaining balance and status."
                 )
 
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -335,7 +413,7 @@ struct MainView: View {
                         HStack {
                             panelHeading(
                                 title: "Budget by Category",
-                                subtitle: "Workbook-style category analysis."
+                                subtitle: "Category analysis based on inventory purchases."
                             )
                             Spacer()
                             Picker("Budget Type", selection: $budgetCategoryTypeSelection) {
@@ -362,7 +440,7 @@ struct MainView: View {
                             }
                         }
                         if groupedBudgetCategories.isEmpty {
-                            Text("No \(budgetCategoryTypeSelection) purchases are currently mapped into yearly category analysis. Once inventory rows have purchase dates, item types, quantity, and cost, this fills automatically.")
+                            Text("No \(budgetCategoryTypeSelection) purchases are mapped yet. Add inventory rows with purchase dates, item types, quantities, and costs to populate this view.")
                                 .font(.caption)
                                 .foregroundStyle(AppTheme.muted)
                                 .padding(.top, 4)
@@ -376,7 +454,7 @@ struct MainView: View {
                     HStack {
                         panelHeading(
                             title: "Budget Configuration",
-                            subtitle: "Add past or future years, then edit targets, fund, and GL values for this workspace."
+                            subtitle: "Add budget years, then edit targets, fund codes, and GL codes for this workspace."
                         )
                         Spacer()
                         HStack(spacing: 8) {
@@ -413,7 +491,7 @@ struct MainView: View {
         SectionShell(
             title: "Inventory workspace",
             eyebrow: AppSection.inventory.eyebrow,
-            subtitle: "Search, sort, filter, edit, and deploy live inventory."
+            subtitle: "Create, search, filter, edit, deploy, and export inventory."
         ) {
             HStack(spacing: 16) {
                 TextField("Search inventory", text: $model.inventorySearch)
@@ -422,6 +500,11 @@ struct MainView: View {
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .foregroundStyle(AppTheme.muted)
                 Spacer()
+                Button("New Item") {
+                    inventoryEditorItem = AppModel.blankInventoryItem(stockroomId: model.selectedStockroomID)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(AppTheme.blue)
                 Button("Deployments") {
                     model.openDeploymentsDrilldown()
                 }
@@ -463,12 +546,12 @@ struct MainView: View {
         SectionShell(
             title: "Deployment ledger",
             eyebrow: AppSection.deployments.eyebrow,
-            subtitle: "Deployment history with sortable fields and live inventory links."
+            subtitle: "Deployment ledger with active and returned history."
         ) {
             HStack(spacing: 16) {
                 TextField("Search deployments", text: $model.deploymentSearch)
                     .textFieldStyle(.roundedBorder)
-                Text("\(model.filteredDeployments.count) active rows")
+                Text("\(model.filteredDeployments.count) ledger rows")
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .foregroundStyle(AppTheme.muted)
                 Spacer()
@@ -504,16 +587,36 @@ struct MainView: View {
             ),
             titleVisibility: .visible
         ) {
-            Button("Return Deployment", role: .destructive) {
+            Button("Mark Returned") {
                 guard let deploymentToReturn else { return }
                 Task {
                     await model.returnDeployment(id: deploymentToReturn.id)
                     self.deploymentToReturn = nil
                 }
             }
+            .disabled(deploymentToReturn?.isReturned == true)
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text(deploymentToReturn?.description ?? "")
+            Text(deploymentToReturn.map { "Mark \($0.description) as returned while keeping it in deployment history." } ?? "")
+        }
+        .confirmationDialog(
+            "Delete deployment?",
+            isPresented: Binding(
+                get: { deploymentToDelete != nil },
+                set: { if !$0 { deploymentToDelete = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete Deployment", role: .destructive) {
+                guard let deployment = deploymentToDelete else { return }
+                Task {
+                    await model.deleteDeployment(id: deployment.id)
+                    deploymentToDelete = nil
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This permanently removes the deployment row. Use Mark Returned if you want to keep deployment history.")
         }
     }
 
@@ -570,10 +673,13 @@ struct MainView: View {
                         deploymentDraft = DeploymentSheetModel(item: item)
                     }
                     .disabled(item.availableQuantity <= 0)
+                    Button("Delete", role: .destructive) {
+                        inventoryToDelete = item
+                    }
                 }
                 .buttonStyle(.borderless)
             }
-            .width(130)
+            .width(190)
         }
     }
 
@@ -612,13 +718,31 @@ struct MainView: View {
                 .width(min: 110, ideal: 130)
             TableColumn("Location", value: \.deployedLocation)
                 .width(min: 120, ideal: 160)
+            TableColumn("Status") { deployment in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(deployment.statusLabel)
+                        .foregroundStyle(deployment.isReturned ? AppTheme.muted : AppTheme.teal)
+                    if deployment.isReturned {
+                        Text(deployment.returnedAt)
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.muted)
+                    }
+                }
+            }
+            .width(min: 110, ideal: 150)
             TableColumn("Actions") { deployment in
-                Button("Return") {
-                    deploymentToReturn = deployment
+                HStack(spacing: 8) {
+                    Button("Mark Returned") {
+                        deploymentToReturn = deployment
+                    }
+                    .disabled(deployment.isReturned)
+                    Button("Delete", role: .destructive) {
+                        deploymentToDelete = deployment
+                    }
                 }
                 .buttonStyle(.borderless)
             }
-            .width(90)
+            .width(140)
         }
     }
 
@@ -697,6 +821,9 @@ struct MainView: View {
                             Button("Open in Inventory") {
                                 model.openInventoryDrilldown(stockroom: stockroom.name)
                             }
+                            Button("New Item Here") {
+                                inventoryEditorItem = AppModel.blankInventoryItem(stockroomId: stockroom.id)
+                            }
                         }
 
                         ScrollView {
@@ -743,7 +870,7 @@ struct MainView: View {
         SectionShell(
             title: "PDF intake and review",
             eyebrow: AppSection.importPDFs.eyebrow,
-            subtitle: "Review parsed quote and PO rows before saving them into inventory."
+            subtitle: "Review parsed quote and purchase-order rows before saving them into inventory."
         ) {
             VStack(alignment: .leading, spacing: 16) {
                 HStack {
@@ -755,7 +882,13 @@ struct MainView: View {
                     .tint(AppTheme.blue)
 
                     if !model.parsedImportItems.isEmpty {
-                        Button("Save to Inventory") {
+                        Text("\(model.parsedImportItems.count) parsed row\(model.parsedImportItems.count == 1 ? "" : "s") ready for review")
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .foregroundStyle(AppTheme.muted)
+                        Button("Clear Parsed Rows", role: .destructive) {
+                            confirmClearParsedPDFs = true
+                        }
+                        Button("Save Reviewed Rows") {
                             Task { await model.saveParsedItems() }
                         }
                         .buttonStyle(.borderedProminent)
@@ -765,9 +898,9 @@ struct MainView: View {
 
                 if model.parsedImportItems.isEmpty {
                     VStack(alignment: .leading, spacing: 10) {
-                        Label("Drop purchase-order PDFs here", systemImage: "square.and.arrow.down.on.square")
+                        Label("Drop quote or purchase-order PDFs here", systemImage: "square.and.arrow.down.on.square")
                             .font(.headline)
-                        Text("Or choose PDFs with the button above. Extracted rows stay editable until you save them into inventory.")
+                        Text("Or choose PDFs with the button above. Parsed rows stay editable until you save them.")
                             .foregroundStyle(AppTheme.muted)
                     }
                     .frame(maxWidth: .infinity, minHeight: 180, alignment: .center)
@@ -775,10 +908,24 @@ struct MainView: View {
                     .onDrop(of: [UTType.pdf.identifier], isTargeted: nil, perform: handlePDFDrop)
                 } else {
                     ForEach($model.parsedImportItems) { $item in
-                        ParsedImportEditor(item: $item)
+                        ParsedImportEditor(item: $item, stockrooms: model.stockrooms) {
+                            model.removeParsedImportItem(id: item.id)
+                        }
                     }
                 }
             }
+        }
+        .confirmationDialog(
+            "Clear parsed PDF rows?",
+            isPresented: $confirmClearParsedPDFs,
+            titleVisibility: .visible
+        ) {
+            Button("Clear Parsed Rows", role: .destructive) {
+                model.clearParsedImportItems()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This discards the current parsed rows. No inventory changes will be saved.")
         }
     }
 
@@ -819,9 +966,9 @@ struct MainView: View {
 
     private var settingsView: some View {
         SectionShell(
-            title: "Workspace and data wiring",
+            title: "Workspace settings",
             eyebrow: AppSection.settings.eyebrow,
-            subtitle: "Workspace identity, database location, and spreadsheet connection."
+            subtitle: "Workspace identity, database location, imports, backups, and spreadsheet sync."
         ) {
             VStack(alignment: .leading, spacing: 16) {
                 workspaceSetupPanel
@@ -829,7 +976,7 @@ struct MainView: View {
                 Divider()
 
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Workspace Branding")
+                    Text("Workspace Details")
                         .font(.headline)
                     HStack {
                         VStack(alignment: .leading, spacing: 6) {
@@ -844,7 +991,7 @@ struct MainView: View {
                             TextField("Standalone Workspace", text: $model.organizationName)
                                 .textFieldStyle(.roundedBorder)
                         }
-                        Button("Save Branding") {
+                        Button("Save Details") {
                             model.saveWorkspaceBranding()
                         }
                     }
@@ -859,7 +1006,7 @@ struct MainView: View {
                         Text(model.databaseURL.path)
                             .textSelection(.enabled)
                             .foregroundStyle(AppTheme.muted)
-                        Text("This database can be shared, duplicated, or swapped to support a different organization.")
+                        Text("This SQLite database can be backed up, restored, or swapped for another workspace.")
                             .font(.caption)
                             .foregroundStyle(AppTheme.muted)
                     }
@@ -889,7 +1036,7 @@ struct MainView: View {
                     }
                     Button("Restore Database") {
                         if let url = FileDialogs.chooseDatabaseFile() {
-                            Task { await model.restoreDatabase(from: url) }
+                            databaseToRestore = url
                         }
                     }
                     Button("Reveal in Finder") {
@@ -909,9 +1056,9 @@ struct MainView: View {
                 Divider()
 
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Excel Inventory File")
+                    Text("Spreadsheet and CSV Imports")
                         .font(.headline)
-                    Text(model.excelInventoryPath.isEmpty ? "No Excel file selected." : model.excelInventoryPath)
+                    Text(model.excelInventoryPath.isEmpty ? "No Excel workbook selected. CSV import is still available." : model.excelInventoryPath)
                         .textSelection(.enabled)
                         .foregroundStyle(AppTheme.muted)
 
@@ -921,15 +1068,20 @@ struct MainView: View {
                                 model.setExcelInventoryPath(url.path)
                             }
                         }
-                        Button("Import from Excel") {
+                        Button("Import Excel") {
                             Task { await model.importFromExcel() }
                         }
                         .disabled(model.excelInventoryPath.isEmpty)
+                        Button("Import CSV") {
+                            if let url = FileDialogs.chooseCSVFile() {
+                                Task { await model.importFromCSV(url: url) }
+                            }
+                        }
                         Button("Preview Import") {
                             Task { await model.previewExcelImport() }
                         }
                         .disabled(model.excelInventoryPath.isEmpty)
-                        Button("Sync Remaining") {
+                        Button("Sync Remaining Inventory") {
                             Task {
                                 do {
                                     try await model.syncRemainingInventoryIfNeeded()
@@ -943,10 +1095,10 @@ struct MainView: View {
                             model.clearExcelInventoryPath()
                         }
                         .disabled(model.excelInventoryPath.isEmpty)
-                        Button("Skip Excel for Now") {
+                        Button("Skip Spreadsheet Sync") {
                             model.acknowledgeSpreadsheetSetup()
                         }
-                        Button("Export Blank CSV Template") {
+                        Button("Export CSV Template") {
                             if let url = FileDialogs.chooseCSVSaveURL(defaultName: "Inventory Template.csv") {
                                 Task { await model.exportBlankInventoryTemplateCSV(to: url) }
                             }
@@ -964,7 +1116,7 @@ struct MainView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Maintenance")
                             .font(.headline)
-                        Text("Import spreadsheet data or remove duplicate inventory rows safely inside the current workspace.")
+                        Text("Clean up duplicate inventory rows or undo the last import in this workspace.")
                             .foregroundStyle(AppTheme.muted)
                     }
                     Spacer()
@@ -1059,13 +1211,13 @@ struct MainView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Quick Start")
                         .font(.title3.bold())
-                    Text("Walk through the core setup choices so this install matches your team, database, and spreadsheet workflow.")
+                    Text("Confirm the workspace name, database, stockrooms, and optional spreadsheet sync before daily use.")
                         .foregroundStyle(AppTheme.muted)
                 }
                 Spacer()
                 if model.isWorkspaceEmpty {
                     HStack(spacing: 8) {
-                        Text("Fresh Workspace")
+                        Text("Empty Workspace")
                             .font(.system(size: 11, weight: .semibold, design: .rounded))
                             .foregroundStyle(AppTheme.blue)
                             .padding(.horizontal, 10)
@@ -1101,6 +1253,10 @@ struct MainView: View {
                     stockroomDraft = StockroomDraft()
                 }
                 .disabled(!model.stockrooms.isEmpty)
+
+                Button("New Inventory Item") {
+                    inventoryEditorItem = AppModel.blankInventoryItem(stockroomId: model.selectedStockroomID)
+                }
 
                 Button("Open Workspace Settings") {
                     model.selectedSection = .settings
@@ -1348,6 +1504,9 @@ struct MainView: View {
                 .frame(width: 110, alignment: .leading)
             Text(deployment.deployedLocation.isEmpty ? "No location" : deployment.deployedLocation)
                 .frame(width: 110, alignment: .leading)
+            Text(deployment.statusLabel)
+                .foregroundStyle(deployment.isReturned ? AppTheme.muted : AppTheme.teal)
+                .frame(width: 90, alignment: .leading)
             VStack(alignment: .leading, spacing: 6) {
                 Text(deployment.notes.isEmpty ? "No notes" : deployment.notes)
                     .lineLimit(3)
@@ -1356,11 +1515,12 @@ struct MainView: View {
                     .foregroundStyle(AppTheme.muted)
             }
             .frame(width: 240, alignment: .leading)
-            Button("Return") {
+            Button("Mark Returned") {
                 deploymentToReturn = deployment
             }
             .buttonStyle(.borderedProminent)
             .tint(AppTheme.rose)
+            .disabled(deployment.isReturned)
         }
         .font(.system(size: 13, weight: .medium, design: .rounded))
         .foregroundStyle(AppTheme.text)
@@ -1397,6 +1557,11 @@ struct MainView: View {
                 Button("Sort by Location") { model.deploymentSort = .location }
                 Divider()
                 deploymentFilterButtons(options: model.deploymentLocationOptions, selection: $model.deploymentLocationFilter)
+            }
+            deploymentHeaderMenu("Status", width: 90) {
+                ForEach(DeploymentStatusFilter.allCases) { status in
+                    Button(status.rawValue) { model.deploymentStatusFilter = status }
+                }
             }
             deploymentHeaderCell("Notes", width: 240)
             deploymentHeaderCell("", width: 80)
@@ -1570,6 +1735,7 @@ struct MainView: View {
     private var activeDeploymentFilters: [String] {
         var filters: [String] = []
         if model.deploymentTypeFilter != "All Types" { filters.append("Type: \(model.deploymentTypeFilter)") }
+        if model.deploymentStatusFilter != .all { filters.append("Status: \(model.deploymentStatusFilter.rawValue)") }
         if model.deploymentByFilter != "All Team Members" { filters.append("Deployed By: \(model.deploymentByFilter)") }
         if model.deploymentLocationFilter != "All Locations" { filters.append("Location: \(model.deploymentLocationFilter)") }
         return filters
@@ -1725,10 +1891,11 @@ struct MainView: View {
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 120)
             Button(role: .destructive) {
-                model.removeAnnualBudgetRecord(id: record.wrappedValue.id)
+                budgetToDelete = record.wrappedValue
             } label: {
                 Image(systemName: "trash")
             }
+            .help("Delete this saved budget row")
             .buttonStyle(.borderless)
         }
         .font(.system(size: 13, weight: .medium, design: .rounded))
@@ -2026,9 +2193,9 @@ struct InventoryEditSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Edit Inventory Item")
+                    Text(item.id == 0 ? "New Inventory Item" : "Edit Inventory Item")
                         .font(.title2.bold())
-                    Text(draft.description)
+                    Text(draft.description.isEmpty ? "Create a manually-entered inventory row." : draft.description)
                         .foregroundStyle(AppTheme.muted)
                 }
                 Spacer()
@@ -2072,7 +2239,7 @@ struct InventoryEditor: View {
                 labeledField("Description", text: $item.description)
                 labeledField("Manufacturer", text: $item.manufacturer)
                 labeledField("Part Number", text: $item.partNumber)
-                labeledField("Purchase Date", text: $item.purchaseDate)
+                labeledField("Purchase Date", text: $item.purchaseDate, prompt: "YYYY-MM-DD or MM/DD/YYYY")
                 labeledField("Vendor", text: $item.vendor)
                 labeledField("PO Number", text: $item.poNumber)
             }
@@ -2120,17 +2287,18 @@ struct InventoryEditor: View {
                 .padding(8)
                 .background(Color.white.opacity(0.55), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
 
-            Button("Save Changes", action: onSave)
+            Button(item.id == 0 ? "Create Item" : "Save Changes", action: onSave)
                 .buttonStyle(.borderedProminent)
                 .tint(AppTheme.blue)
+                .disabled(item.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
     }
 
-    private func labeledField(_ label: String, text: Binding<String>) -> some View {
+    private func labeledField(_ label: String, text: Binding<String>, prompt: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(label)
                 .font(.caption.weight(.semibold))
-            TextField(label, text: text)
+            TextField(prompt ?? label, text: text)
                 .textFieldStyle(.roundedBorder)
         }
     }
@@ -2167,7 +2335,7 @@ struct DeploySheet: View {
             Stepper("Quantity: \(qty)", value: $qty, in: 1...max(1, item.availableQuantity))
             labeled("Deployed To", text: $deployedTo)
             labeled("Deployed By", text: $deployedBy)
-            labeled("Deployment Date", text: $deployedDate)
+            labeled("Deployment Date", text: $deployedDate, prompt: "YYYY-MM-DD or MM/DD/YYYY")
             labeled("Location", text: $location)
 
             Text("Notes")
@@ -2196,11 +2364,11 @@ struct DeploySheet: View {
         }
     }
 
-    private func labeled(_ label: String, text: Binding<String>) -> some View {
+    private func labeled(_ label: String, text: Binding<String>, prompt: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(label)
                 .font(.caption.weight(.semibold))
-            TextField(label, text: text)
+            TextField(prompt ?? label, text: text)
                 .textFieldStyle(.roundedBorder)
         }
     }
@@ -2208,18 +2376,35 @@ struct DeploySheet: View {
 
 struct ParsedImportEditor: View {
     @Binding var item: ParsedImportItem
+    let stockrooms: [StockroomRecord]
+    let onRemove: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text(item.sourceFile)
                     .font(.headline)
+                Text(item.description.isEmpty ? "Review before saving" : item.description)
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.muted)
+                    .lineLimit(1)
                 Spacer()
+                Button("Remove Row", role: .destructive, action: onRemove)
                 Picker("Budget", selection: $item.budgetType) {
                     Text("Capital").tag("Capital")
                     Text("OpEx").tag("OpEx")
                 }
                 .frame(width: 140)
+                Picker("Stockroom", selection: Binding(
+                    get: { item.stockroomId ?? -1 },
+                    set: { item.stockroomId = $0 == -1 ? nil : $0 }
+                )) {
+                    Text("Unassigned").tag(Int64(-1))
+                    ForEach(stockrooms) { stockroom in
+                        Text(stockroom.name).tag(stockroom.id)
+                    }
+                }
+                .frame(width: 170)
             }
 
             HStack {
@@ -2233,7 +2418,7 @@ struct ParsedImportEditor: View {
             HStack {
                 editorField("Vendor", text: $item.vendor)
                 editorField("PO Number", text: $item.poNumber)
-                editorField("Purchase Date", text: $item.purchaseDate)
+                editorField("Purchase Date", text: $item.purchaseDate, prompt: "YYYY-MM-DD or MM/DD/YYYY")
             }
 
             HStack {
@@ -2267,11 +2452,11 @@ struct ParsedImportEditor: View {
         .frostedPanel()
     }
 
-    private func editorField(_ label: String, text: Binding<String>) -> some View {
+    private func editorField(_ label: String, text: Binding<String>, prompt: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(label)
                 .font(.caption.weight(.semibold))
-            TextField(label, text: text)
+            TextField(prompt ?? label, text: text)
                 .textFieldStyle(.roundedBorder)
         }
     }

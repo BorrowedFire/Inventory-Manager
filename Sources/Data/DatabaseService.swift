@@ -50,6 +50,17 @@ final class DatabaseService: @unchecked Sendable {
             defer { sqlite3_close(db) }
             configureConnection(db)
 
+            func deploymentColumnExists(_ columnName: String) -> Bool {
+                var statement: OpaquePointer?
+                guard sqlite3_prepare_v2(db, "PRAGMA table_info(deployments)", -1, &statement, nil) == SQLITE_OK else { return false }
+                defer { sqlite3_finalize(statement) }
+                while sqlite3_step(statement) == SQLITE_ROW {
+                    guard let namePointer = sqlite3_column_text(statement, 1) else { continue }
+                    if String(cString: namePointer) == columnName { return true }
+                }
+                return false
+            }
+
             let schemaSQL = """
             PRAGMA journal_mode = WAL;
             PRAGMA foreign_keys = ON;
@@ -92,7 +103,9 @@ final class DatabaseService: @unchecked Sendable {
               deployedLocation TEXT DEFAULT '',
               notes TEXT,
               createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-              stockroomId INTEGER
+              stockroomId INTEGER,
+              returnedAt DATETIME,
+              returnedBy TEXT
             );
             CREATE INDEX IF NOT EXISTS index_deployments_on_partNumber ON deployments(partNumber);
             CREATE INDEX IF NOT EXISTS index_deployments_on_inventoryItemId ON deployments(inventoryItemId);
@@ -164,7 +177,31 @@ final class DatabaseService: @unchecked Sendable {
               SELECT RAISE(ABORT, 'Unit cost cannot be negative.') WHERE NEW.unitCost < 0;
             END;
 
-            CREATE TRIGGER IF NOT EXISTS validate_deployments_insert
+            """
+
+            guard sqlite3_exec(db, schemaSQL, nil, nil, nil) == SQLITE_OK else {
+                throw DatabaseError.stepFailed(lastMessage(from: db))
+            }
+
+            if !deploymentColumnExists("returnedAt") {
+                guard sqlite3_exec(db, "ALTER TABLE deployments ADD COLUMN returnedAt DATETIME", nil, nil, nil) == SQLITE_OK else {
+                    throw DatabaseError.stepFailed(lastMessage(from: db))
+                }
+            }
+            if !deploymentColumnExists("returnedBy") {
+                guard sqlite3_exec(db, "ALTER TABLE deployments ADD COLUMN returnedBy TEXT", nil, nil, nil) == SQLITE_OK else {
+                    throw DatabaseError.stepFailed(lastMessage(from: db))
+                }
+            }
+            guard sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS index_deployments_on_returnedAt ON deployments(returnedAt)", nil, nil, nil) == SQLITE_OK else {
+                throw DatabaseError.stepFailed(lastMessage(from: db))
+            }
+
+            let deploymentTriggersSQL = """
+            DROP TRIGGER IF EXISTS validate_deployments_insert;
+            DROP TRIGGER IF EXISTS validate_deployments_update;
+
+            CREATE TRIGGER validate_deployments_insert
             BEFORE INSERT ON deployments
             WHEN NEW.inventoryItemId IS NOT NULL
             BEGIN
@@ -173,13 +210,13 @@ final class DatabaseService: @unchecked Sendable {
               WHERE (
                 SELECT COALESCE(SUM(qtyDeployed), 0)
                 FROM deployments
-                WHERE inventoryItemId = NEW.inventoryItemId
+                WHERE inventoryItemId = NEW.inventoryItemId AND returnedAt IS NULL
               ) + NEW.qtyDeployed > (
                 SELECT quantity FROM inventory_items WHERE id = NEW.inventoryItemId
               );
             END;
 
-            CREATE TRIGGER IF NOT EXISTS validate_deployments_update
+            CREATE TRIGGER validate_deployments_update
             BEFORE UPDATE ON deployments
             WHEN NEW.inventoryItemId IS NOT NULL
             BEGIN
@@ -188,14 +225,13 @@ final class DatabaseService: @unchecked Sendable {
               WHERE (
                 SELECT COALESCE(SUM(qtyDeployed), 0)
                 FROM deployments
-                WHERE inventoryItemId = NEW.inventoryItemId AND id <> OLD.id
-              ) + NEW.qtyDeployed > (
+                WHERE inventoryItemId = NEW.inventoryItemId AND id <> OLD.id AND returnedAt IS NULL
+              ) + CASE WHEN NEW.returnedAt IS NULL THEN NEW.qtyDeployed ELSE 0 END > (
                 SELECT quantity FROM inventory_items WHERE id = NEW.inventoryItemId
               );
             END;
             """
-
-            guard sqlite3_exec(db, schemaSQL, nil, nil, nil) == SQLITE_OK else {
+            guard sqlite3_exec(db, deploymentTriggersSQL, nil, nil, nil) == SQLITE_OK else {
                 throw DatabaseError.stepFailed(lastMessage(from: db))
             }
 
@@ -220,7 +256,8 @@ final class DatabaseService: @unchecked Sendable {
               (1, 'initial_public_schema'),
               (2, 'transactional_imports_and_inventory_constraints'),
               (3, 'native_mac_product_polish'),
-              (4, 'release_safety_backups_and_import_preview');
+              (4, 'release_safety_backups_and_import_preview'),
+              (5, 'release_readiness_inventory_and_return_workflows');
             """
             guard sqlite3_exec(db, migrationSQL, nil, nil, nil) == SQLITE_OK else {
                 throw DatabaseError.stepFailed(lastMessage(from: db))
@@ -235,7 +272,7 @@ final class DatabaseService: @unchecked Sendable {
               COUNT(*) AS itemCount,
               COALESCE(SUM(quantity), 0) AS totalQuantity,
               COALESCE(SUM(unitCost * quantity), 0) AS totalValue,
-              (SELECT COALESCE(SUM(qtyDeployed), 0) FROM deployments) AS totalDeployed,
+              (SELECT COALESCE(SUM(qtyDeployed), 0) FROM deployments WHERE returnedAt IS NULL) AS totalDeployed,
               (SELECT COUNT(*) FROM stockrooms) AS stockroomCount,
               (SELECT COUNT(*)
                FROM (
@@ -244,6 +281,7 @@ final class DatabaseService: @unchecked Sendable {
                  LEFT JOIN (
                     SELECT inventoryItemId, SUM(qtyDeployed) AS deployedQty
                     FROM deployments
+                    WHERE returnedAt IS NULL
                     GROUP BY inventoryItemId
                  ) d ON d.inventoryItemId = i.id
                  WHERE MAX(i.quantity - COALESCE(d.deployedQty, 0), 0) BETWEEN 1 AND 2
@@ -256,16 +294,16 @@ final class DatabaseService: @unchecked Sendable {
             """
             SELECT COUNT(*)
             FROM deployments
-            WHERE strftime('%Y-%m', deployedDate) = strftime('%Y-%m', 'now', 'localtime')
+            WHERE returnedAt IS NULL AND strftime('%Y-%m', deployedDate) = strftime('%Y-%m', 'now', 'localtime')
             """
         )
 
         let stats = [
             DashboardStat(title: "Cataloged Items", value: formatInteger(totals.int(named: "itemCount")), note: "\(formatInteger(totals.int(named: "totalQuantity"))) units tracked", accent: "amber"),
-            DashboardStat(title: "Inventory Value", value: formatCurrency(totals.double(named: "totalValue")), note: "purchase-value footprint", accent: "blue"),
+            DashboardStat(title: "Inventory Value", value: formatCurrency(totals.double(named: "totalValue")), note: "purchase value", accent: "blue"),
             DashboardStat(title: "Total Deployed", value: formatInteger(totals.int(named: "totalDeployed")), note: "\(deploymentsThisMonth) this month", accent: "teal"),
-            DashboardStat(title: "Low Stock Alerts", value: formatInteger(totals.int(named: "lowStockCount")), note: "items with 1-2 left", accent: "rose"),
-            DashboardStat(title: "Stockrooms", value: formatInteger(totals.int(named: "stockroomCount")), note: "active room locations", accent: "indigo"),
+            DashboardStat(title: "Low Stock Alerts", value: formatInteger(totals.int(named: "lowStockCount")), note: "items with 1–2 available", accent: "rose"),
+            DashboardStat(title: "Stockrooms", value: formatInteger(totals.int(named: "stockroomCount")), note: "configured stockrooms", accent: "indigo"),
             DashboardStat(title: "Database", value: "Live", note: databaseURL.lastPathComponent, accent: "mint")
         ]
 
@@ -430,6 +468,7 @@ final class DatabaseService: @unchecked Sendable {
             LEFT JOIN (
               SELECT inventoryItemId, SUM(qtyDeployed) AS totalDeployed
               FROM deployments
+              WHERE returnedAt IS NULL
               GROUP BY inventoryItemId
             ) d ON d.inventoryItemId = i.id
             ORDER BY i.updatedAt DESC, i.id DESC
@@ -473,10 +512,12 @@ final class DatabaseService: @unchecked Sendable {
               d.deployedLocation,
               d.qtyDeployed,
               COALESCE(s.name, 'Unassigned') AS stockroomName,
-              COALESCE(d.notes, '') AS notes
+              COALESCE(d.notes, '') AS notes,
+              COALESCE(datetime(d.returnedAt, 'localtime'), '') AS returnedAt,
+              COALESCE(d.returnedBy, '') AS returnedBy
             FROM deployments d
             LEFT JOIN stockrooms s ON s.id = d.stockroomId
-            ORDER BY d.deployedDate DESC, d.id DESC
+            ORDER BY d.returnedAt IS NOT NULL, d.deployedDate DESC, d.id DESC
             """
         ).map { row in
             DeploymentRecord(
@@ -492,7 +533,9 @@ final class DatabaseService: @unchecked Sendable {
                 deployedLocation: row.string(named: "deployedLocation"),
                 qtyDeployed: row.int(named: "qtyDeployed"),
                 stockroomName: row.string(named: "stockroomName"),
-                notes: row.string(named: "notes")
+                notes: row.string(named: "notes"),
+                returnedAt: row.string(named: "returnedAt"),
+                returnedBy: row.string(named: "returnedBy")
             )
         }
     }
@@ -730,6 +773,28 @@ final class DatabaseService: @unchecked Sendable {
         }
     }
 
+    func deleteAnnualBudget(year: String, budgetType: String) throws {
+        let trimmedYear = year.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedType = budgetType.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let yearValue = Int(trimmedYear), !trimmedType.isEmpty else { return }
+
+        try withTransaction { db in
+            try execute(
+                "DELETE FROM annual_budgets WHERE year = ? AND lower(budgetType) = lower(?)",
+                bindings: [.int(yearValue), .text(trimmedType)],
+                db: db
+            )
+            try insertAudit(
+                action: "delete",
+                entityType: "budget",
+                entityId: 0,
+                details: "Deleted \(trimmedYear) \(trimmedType) budget target",
+                performedBy: NSUserName(),
+                db: db
+            )
+        }
+    }
+
     func stockrooms() throws -> [StockroomRecord] {
         try query(
             """
@@ -948,8 +1013,44 @@ final class DatabaseService: @unchecked Sendable {
         )
     }
 
+    func createInventoryItem(_ item: InventoryItemRecord) throws -> Int64 {
+        try validateInventoryValues(quantity: item.quantity, qtyReceived: item.qtyReceived, unitCost: item.unitCost)
+        return try withTransaction { db in
+            try execute(
+                """
+                INSERT INTO inventory_items
+                (itemType, description, manufacturer, partNumber, purchaseDate, vendor, unitCost, quantity, qtyReceived, poNumber, notes, budgetType, stockroomId)
+                VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?)
+                """,
+                bindings: [
+                    .text(item.itemType),
+                    .text(item.description),
+                    .text(item.manufacturer),
+                    .text(item.partNumber),
+                    .text(item.purchaseDate),
+                    .text(item.vendor),
+                    .double(item.unitCost),
+                    .int(item.quantity),
+                    .int(item.qtyReceived),
+                    .text(item.poNumber),
+                    .text(item.notes),
+                    .text(item.budgetType),
+                    .optionalInt64(item.stockroomId)
+                ],
+                db: db
+            )
+            let newID = Int64(sqlite3_last_insert_rowid(db))
+            try insertAudit(action: "create", entityType: "item", entityId: newID, details: "Created \(item.partNumber) \(item.description)", performedBy: NSUserName(), db: db)
+            return newID
+        }
+    }
+
     func updateInventoryItem(_ item: InventoryItemRecord) throws {
         try validateInventoryValues(quantity: item.quantity, qtyReceived: item.qtyReceived, unitCost: item.unitCost)
+        let deployedQuantity = try activeDeployedQuantity(for: item.id)
+        guard item.quantity >= deployedQuantity else {
+            throw DatabaseError.stepFailed("Quantity cannot be less than the active deployed quantity (\(deployedQuantity)). Return or delete deployments first.")
+        }
         try execute(
             """
             UPDATE inventory_items
@@ -979,6 +1080,34 @@ final class DatabaseService: @unchecked Sendable {
         try insertAudit(action: "edit", entityType: "item", entityId: item.id, details: "Updated \(item.partNumber) \(item.description)", performedBy: NSUserName())
     }
 
+    func deleteInventoryItem(id: Int64) throws {
+        try withTransaction { db in
+            let rows = try query(
+                """
+                SELECT COALESCE(partNumber, '') AS partNumber, COALESCE(description, '') AS description
+                FROM inventory_items
+                WHERE id = ?
+                LIMIT 1
+                """,
+                bindings: [.int64(id)],
+                db: db
+            )
+
+            guard let existing = rows.first else { return }
+
+            try execute("DELETE FROM deployments WHERE inventoryItemId = ?", bindings: [.int64(id)], db: db)
+            try execute("DELETE FROM inventory_items WHERE id = ?", bindings: [.int64(id)], db: db)
+            try insertAudit(
+                action: "delete",
+                entityType: "item",
+                entityId: id,
+                details: "Deleted \(existing.string(named: "partNumber")) \(existing.string(named: "description"))",
+                performedBy: NSUserName(),
+                db: db
+            )
+        }
+    }
+
     func inventoryItem(id: Int64) throws -> InventoryItemRecord? {
         try query(
             """
@@ -1005,6 +1134,7 @@ final class DatabaseService: @unchecked Sendable {
             LEFT JOIN (
               SELECT inventoryItemId, SUM(qtyDeployed) AS totalDeployed
               FROM deployments
+              WHERE returnedAt IS NULL
               GROUP BY inventoryItemId
             ) d ON d.inventoryItemId = i.id
             WHERE i.id = ?
@@ -1041,6 +1171,38 @@ final class DatabaseService: @unchecked Sendable {
         try withTransaction { db in
             let rows = try query(
                 """
+                SELECT id, partNumber, COALESCE(description, '') AS description, COALESCE(deployedTo, '') AS deployedTo, returnedAt
+                FROM deployments
+                WHERE id = ?
+                LIMIT 1
+                """,
+                bindings: [.int64(id)],
+                db: db
+            )
+
+            guard let existing = rows.first else { return }
+            guard existing.string(named: "returnedAt").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+            try execute(
+                "UPDATE deployments SET returnedAt = CURRENT_TIMESTAMP, returnedBy = ? WHERE id = ?",
+                bindings: [.text(NSUserName()), .int64(id)],
+                db: db
+            )
+            try insertAudit(
+                action: "return",
+                entityType: "deployment",
+                entityId: id,
+                details: "Returned \(existing.string(named: "partNumber")) from \(existing.string(named: "deployedTo"))",
+                performedBy: NSUserName(),
+                db: db
+            )
+        }
+    }
+
+    func deleteDeployment(id: Int64) throws {
+        try withTransaction { db in
+            let rows = try query(
+                """
                 SELECT id, partNumber, COALESCE(description, '') AS description, COALESCE(deployedTo, '') AS deployedTo
                 FROM deployments
                 WHERE id = ?
@@ -1054,10 +1216,10 @@ final class DatabaseService: @unchecked Sendable {
 
             try execute("DELETE FROM deployments WHERE id = ?", bindings: [.int64(id)], db: db)
             try insertAudit(
-                action: "return",
+                action: "delete",
                 entityType: "deployment",
                 entityId: id,
-                details: "Returned \(existing.string(named: "partNumber")) from \(existing.string(named: "deployedTo"))",
+                details: "Deleted deployment for \(existing.string(named: "partNumber")) to \(existing.string(named: "deployedTo"))",
                 performedBy: NSUserName(),
                 db: db
             )
@@ -1431,6 +1593,7 @@ final class DatabaseService: @unchecked Sendable {
             LEFT JOIN (
               SELECT inventoryItemId, SUM(qtyDeployed) AS totalDeployed
               FROM deployments
+              WHERE returnedAt IS NULL
               GROUP BY inventoryItemId
             ) d ON d.inventoryItemId = i.id
             WHERE TRIM(COALESCE(i.partNumber, '')) <> ''
@@ -1509,8 +1672,8 @@ final class DatabaseService: @unchecked Sendable {
             try execute(
                 """
                 INSERT INTO inventory_items
-                (itemType, description, manufacturer, partNumber, purchaseDate, vendor, unitCost, quantity, qtyReceived, poNumber, notes, sourcePDF, budgetType)
-                VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?)
+                (itemType, description, manufacturer, partNumber, purchaseDate, vendor, unitCost, quantity, qtyReceived, poNumber, notes, sourcePDF, budgetType, stockroomId)
+                VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?)
                 """,
                 bindings: [
                     .text(item.itemType),
@@ -1525,7 +1688,8 @@ final class DatabaseService: @unchecked Sendable {
                     .text(item.poNumber),
                     .text(item.notes),
                     .text(item.sourceFile),
-                    .text(item.budgetType)
+                    .text(item.budgetType),
+                    .optionalInt64(item.stockroomId)
                 ]
             )
             inventoryFingerprints.insert(fingerprint)
@@ -1619,12 +1783,24 @@ final class DatabaseService: @unchecked Sendable {
             LEFT JOIN (
               SELECT inventoryItemId, SUM(qtyDeployed) AS totalDeployed
               FROM deployments
+              WHERE returnedAt IS NULL
               GROUP BY inventoryItemId
             ) d ON d.inventoryItemId = i.id
             WHERE i.id = ?
             """,
             bindings: [.int64(inventoryItemId)]
         ).int(named: "availableQuantity")
+    }
+
+    private func activeDeployedQuantity(for inventoryItemId: Int64) throws -> Int {
+        try singleRow(
+            """
+            SELECT COALESCE(SUM(qtyDeployed), 0) AS deployedQuantity
+            FROM deployments
+            WHERE inventoryItemId = ? AND returnedAt IS NULL
+            """,
+            bindings: [.int64(inventoryItemId)]
+        ).int(named: "deployedQuantity")
     }
 
     private func availableQuantity(for inventoryItemId: Int64, db: OpaquePointer?) throws -> Int {
@@ -1636,6 +1812,7 @@ final class DatabaseService: @unchecked Sendable {
             LEFT JOIN (
               SELECT inventoryItemId, SUM(qtyDeployed) AS totalDeployed
               FROM deployments
+              WHERE returnedAt IS NULL
               GROUP BY inventoryItemId
             ) d ON d.inventoryItemId = i.id
             WHERE i.id = ?

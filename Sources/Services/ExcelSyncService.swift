@@ -157,6 +157,24 @@ final class ExcelSyncService: @unchecked Sendable {
         try validateSuccess(try run(command: "update-inventory", excelPath: excelPath, payload: payload, decode: SuccessResponse.self))
     }
 
+    func deleteInventory(_ item: InventoryItemRecord, linkedDeployments: [DeploymentRecord] = [], from excelPath: String) throws {
+        var payload: [String: Any] = [
+            "items": [inventoryPayload(for: item)]
+        ]
+        if !linkedDeployments.isEmpty {
+            payload["deployments"] = linkedDeployments.map(deploymentPayload)
+        }
+        try validateSuccess(try run(command: "delete-inventory", excelPath: excelPath, payload: payload, decode: SuccessResponse.self))
+    }
+
+    func deleteDeployments(_ deployments: [DeploymentRecord], from excelPath: String) throws {
+        guard !deployments.isEmpty else { return }
+        let payload: [String: Any] = [
+            "deployments": deployments.map(deploymentPayload)
+        ]
+        try validateSuccess(try run(command: "delete-deployed", excelPath: excelPath, payload: payload, decode: SuccessResponse.self))
+    }
+
     func resolvedScriptPath() -> String? {
         let candidates: [String?] = [
             Bundle.main.resourceURL?
@@ -257,6 +275,21 @@ final class ExcelSyncService: @unchecked Sendable {
             "notes": item.notes,
             "budgetType": item.budgetType,
             "remainingInventory": item.availableQuantity
+        ]
+    }
+
+    private func deploymentPayload(for deployment: DeploymentRecord) -> [String: Any] {
+        [
+            "itemType": deployment.itemType,
+            "description": deployment.description,
+            "manufacturer": deployment.manufacturer,
+            "partNumber": deployment.partNumber,
+            "qtyDeployed": deployment.qtyDeployed,
+            "deployedTo": deployment.deployedTo,
+            "deployedBy": deployment.deployedBy,
+            "deployedDate": deployment.deployedDate,
+            "deployedLocation": deployment.deployedLocation,
+            "notes": deployment.notes
         ]
     }
 }

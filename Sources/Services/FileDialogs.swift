@@ -41,6 +41,16 @@ enum FileDialogs {
     }
 
     @MainActor
+    static func chooseCSVFile() -> URL? {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.commaSeparatedText]
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        return panel.runModal() == .OK ? panel.url : nil
+    }
+
+    @MainActor
     static func chooseDatabaseFile() -> URL? {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.database, .data]

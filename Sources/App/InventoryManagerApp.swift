@@ -30,6 +30,16 @@ struct InventoryManagerApp: App {
         .windowResizability(.contentSize)
         .commands {
             CommandGroup(after: .newItem) {
+                Button("New Inventory Item…") {
+                    model.requestCommand(.newInventoryItem)
+                }
+                .keyboardShortcut("n", modifiers: [.command])
+
+                Button("Create Stockroom…") {
+                    model.requestCommand(.createStockroom)
+                }
+                .keyboardShortcut("n", modifiers: [.command, .shift])
+
                 Button("Refresh Workspace") {
                     Task { await model.load() }
                 }
@@ -40,6 +50,29 @@ struct InventoryManagerApp: App {
                 }
                 .keyboardShortcut("i", modifiers: [.command, .shift])
                 .disabled(model.excelInventoryPath.isEmpty)
+
+                Button("Import CSV…") {
+                    if let url = FileDialogs.chooseCSVFile() {
+                        Task { await model.importFromCSV(url: url) }
+                    }
+                }
+
+                Button("Export Inventory CSV…") {
+                    if let url = FileDialogs.chooseCSVSaveURL(defaultName: "inventory-export.csv") {
+                        Task { await model.exportInventoryCSV(to: url) }
+                    }
+                }
+                .keyboardShortcut("e", modifiers: [.command, .shift])
+
+                Button("Preview Import") {
+                    Task { await model.previewExcelImport() }
+                }
+                .disabled(model.excelInventoryPath.isEmpty)
+
+                Button("Save PDF Import") {
+                    Task { await model.saveParsedItems() }
+                }
+                .disabled(model.parsedImportItems.isEmpty)
 
                 Button("Sync Remaining Inventory") {
                     Task {
