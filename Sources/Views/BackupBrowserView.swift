@@ -3,6 +3,7 @@ import SwiftUI
 struct BackupBrowserView: View {
     @ObservedObject var model: AppModel
     var limit: Int = 8
+    @State private var backupToRestore: BackupRecord?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -35,12 +36,31 @@ struct BackupBrowserView: View {
                         }
                         Spacer()
                         Button("Reveal") { FileDialogs.revealInFinder(backup.url) }
-                        Button("Restore") { Task { await model.restoreBackup(backup) } }
+                        Button("Restore") { backupToRestore = backup }
                     }
                     .padding(10)
                     .background(Color.white.opacity(0.55), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
             }
+        }
+        .confirmationDialog(
+            "Restore backup?",
+            isPresented: Binding(
+                get: { backupToRestore != nil },
+                set: { if !$0 { backupToRestore = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Restore Backup", role: .destructive) {
+                guard let backup = backupToRestore else { return }
+                Task {
+                    await model.restoreBackup(backup)
+                    backupToRestore = nil
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(backupToRestore.map { "Replace the current database with \($0.name). The current database will be backed up first." } ?? "")
         }
     }
 }

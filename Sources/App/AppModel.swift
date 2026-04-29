@@ -538,7 +538,7 @@ final class AppModel: ObservableObject {
         do {
             let databaseService = self.databaseService
             try await retryingDatabaseCall { try databaseService.seedDemoWorkspace() }
-            lastImportSummary = "Demo workspace loaded. You can remove it later by creating a new database."
+            lastImportSummary = "Demo workspace loaded. You can delete demo inventory, deployments, and saved budgets from their rows, or create a new database to start over."
             await load()
         } catch {
             errorMessage = error.localizedDescription
@@ -597,6 +597,7 @@ final class AppModel: ObservableObject {
         let backupRoots = [
             databaseURL.deletingLastPathComponent(),
             databaseURL.deletingLastPathComponent().appendingPathComponent("Backups", isDirectory: true),
+            databaseURL.deletingLastPathComponent().appendingPathComponent("Backups", isDirectory: true).appendingPathComponent("Before Imports", isDirectory: true),
             databaseURL.deletingLastPathComponent().appendingPathComponent("Backups", isDirectory: true).appendingPathComponent("Before Updates", isDirectory: true)
         ]
 

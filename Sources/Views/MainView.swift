@@ -29,6 +29,7 @@ struct MainView: View {
     @State private var stockroomDraft: StockroomDraft?
     @State private var stockroomToDelete: StockroomRecord?
     @State private var budgetToDelete: AnnualBudgetRecord?
+    @State private var databaseToRestore: URL?
     @State private var showOnboarding = false
     @State private var showInstallGuide = false
     @State private var budgetCategoryTypeSelection = "Capital"
@@ -209,6 +210,25 @@ struct MainView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text(budgetToDelete.map { "Remove the saved \($0.year) \($0.budgetType) budget target." } ?? "")
+        }
+        .confirmationDialog(
+            "Restore database?",
+            isPresented: Binding(
+                get: { databaseToRestore != nil },
+                set: { if !$0 { databaseToRestore = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Restore Database", role: .destructive) {
+                guard let url = databaseToRestore else { return }
+                Task {
+                    await model.restoreDatabase(from: url)
+                    databaseToRestore = nil
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(databaseToRestore.map { "Replace the current database with \($0.lastPathComponent). The current database will be backed up first." } ?? "")
         }
     }
 
@@ -957,7 +977,7 @@ struct MainView: View {
                     }
                     Button("Restore Database") {
                         if let url = FileDialogs.chooseDatabaseFile() {
-                            Task { await model.restoreDatabase(from: url) }
+                            databaseToRestore = url
                         }
                     }
                     Button("Reveal in Finder") {
