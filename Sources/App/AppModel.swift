@@ -69,6 +69,7 @@ final class AppModel: ObservableObject {
     @Published var inventoryPOSearch = ""
     @Published var deploymentSearch = ""
     @Published var deploymentSort: DeploymentSortOption = .dateNewest
+    @Published var deploymentStatusFilter: DeploymentStatusFilter = .all
     @Published var deploymentTypeFilter = "All Types"
     @Published var deploymentLocationFilter = "All Locations"
     @Published var deploymentByFilter = "All Team Members"
@@ -160,8 +161,13 @@ final class AppModel: ObservableObject {
             let matchesType = deploymentTypeFilter == "All Types" || deployment.itemType == deploymentTypeFilter
             let matchesLocation = deploymentLocationFilter == "All Locations" || deployment.deployedLocation == deploymentLocationFilter
             let matchesDeployedBy = deploymentByFilter == "All Team Members" || deployment.deployedBy == deploymentByFilter
+            let matchesStatus: Bool = switch deploymentStatusFilter {
+            case .all: true
+            case .active: !deployment.isReturned
+            case .returned: deployment.isReturned
+            }
 
-            return matchesSearch && matchesType && matchesLocation && matchesDeployedBy
+            return matchesSearch && matchesType && matchesLocation && matchesDeployedBy && matchesStatus
         }
         .sorted(by: deploymentSortComparator)
     }
@@ -745,6 +751,15 @@ final class AppModel: ObservableObject {
         }.value
     }
 
+    func removeParsedImportItem(id: UUID) {
+        parsedImportItems.removeAll { $0.id == id }
+    }
+
+    func clearParsedImportItems() {
+        parsedImportItems = []
+        lastImportSummary = "Cleared parsed PDF rows. No inventory changes were saved."
+    }
+
     func saveParsedItems() async {
         guard !parsedImportItems.isEmpty else { return }
 
@@ -832,6 +847,7 @@ final class AppModel: ObservableObject {
 
     func openDeploymentsDrilldown(search: String? = nil) {
         deploymentSort = .dateNewest
+        deploymentStatusFilter = .all
         deploymentTypeFilter = "All Types"
         deploymentLocationFilter = "All Locations"
         deploymentByFilter = "All Team Members"

@@ -9,7 +9,7 @@ struct AppSettingsView: View {
             Section("Workspace") {
                 TextField("App Name", text: $model.appDisplayName)
                 TextField("Organization", text: $model.organizationName)
-                Button("Save Workspace Details") {
+                Button("Save Details") {
                     model.saveWorkspaceBranding()
                 }
             }
@@ -69,12 +69,12 @@ struct AppSettingsView: View {
                 }
 
                 HStack {
-                    Button("Choose Excel File…") {
+                    Button("Choose Excel Workbook…") {
                         if let url = FileDialogs.chooseExcelFile() {
                             model.setExcelInventoryPath(url.path)
                         }
                     }
-                    Button("Import Now") {
+                    Button("Import Excel") {
                         Task { await model.importFromExcel() }
                     }
                     .disabled(model.excelInventoryPath.isEmpty)
@@ -87,11 +87,11 @@ struct AppSettingsView: View {
                         Task { await model.undoLastImport() }
                     }
                     .disabled(model.lastImportUndoBackupURL == nil)
-                    Button("Preview") {
+                    Button("Preview Excel Import") {
                         Task { await model.previewExcelImport() }
                     }
                     .disabled(model.excelInventoryPath.isEmpty)
-                    Button("Clear") {
+                    Button("Clear Excel Path") {
                         model.clearExcelInventoryPath()
                     }
                     .disabled(model.excelInventoryPath.isEmpty)

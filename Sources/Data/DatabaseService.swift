@@ -300,10 +300,10 @@ final class DatabaseService: @unchecked Sendable {
 
         let stats = [
             DashboardStat(title: "Cataloged Items", value: formatInteger(totals.int(named: "itemCount")), note: "\(formatInteger(totals.int(named: "totalQuantity"))) units tracked", accent: "amber"),
-            DashboardStat(title: "Inventory Value", value: formatCurrency(totals.double(named: "totalValue")), note: "purchase-value footprint", accent: "blue"),
+            DashboardStat(title: "Inventory Value", value: formatCurrency(totals.double(named: "totalValue")), note: "purchase value", accent: "blue"),
             DashboardStat(title: "Total Deployed", value: formatInteger(totals.int(named: "totalDeployed")), note: "\(deploymentsThisMonth) this month", accent: "teal"),
-            DashboardStat(title: "Low Stock Alerts", value: formatInteger(totals.int(named: "lowStockCount")), note: "items with 1-2 left", accent: "rose"),
-            DashboardStat(title: "Stockrooms", value: formatInteger(totals.int(named: "stockroomCount")), note: "active room locations", accent: "indigo"),
+            DashboardStat(title: "Low Stock Alerts", value: formatInteger(totals.int(named: "lowStockCount")), note: "items with 1–2 available", accent: "rose"),
+            DashboardStat(title: "Stockrooms", value: formatInteger(totals.int(named: "stockroomCount")), note: "configured stockrooms", accent: "indigo"),
             DashboardStat(title: "Database", value: "Live", note: databaseURL.lastPathComponent, accent: "mint")
         ]
 

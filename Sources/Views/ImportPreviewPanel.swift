@@ -14,7 +14,7 @@ struct ImportPreviewPanel: View {
                 }
                 Spacer()
                 if preview.hasConflicts {
-                    Label("Review conflicts", systemImage: "exclamationmark.triangle")
+                    Label("Review conflicts before importing", systemImage: "exclamationmark.triangle")
                         .foregroundStyle(.orange)
                 }
             }
