@@ -366,11 +366,24 @@ final class AppModel: ObservableObject {
     func deleteInventoryItem(id: Int64) async {
         do {
             let databaseService = self.databaseService
+            let item = try await retryingDatabaseCall {
+                try databaseService.inventoryItem(id: id)
+            }
+            let linkedDeployments = try await retryingDatabaseCall {
+                try databaseService.deployments().filter { $0.inventoryItemId == id }
+            }
+            if !excelInventoryPath.isEmpty {
+                guard let item else {
+                    throw DatabaseError.stepFailed("Could not find the inventory item to remove from Excel.")
+                }
+                try excelSyncService.deleteInventory(item, linkedDeployments: linkedDeployments, from: excelInventoryPath)
+            }
             try await retryingDatabaseCall { try databaseService.deleteInventoryItem(id: id) }
             if selectedInventoryID == id {
                 selectedInventoryID = nil
             }
             try await syncRemainingInventoryIfNeeded()
+            persistExcelSyncMarker()
             await load()
         } catch {
             errorMessage = error.localizedDescription
@@ -391,8 +404,18 @@ final class AppModel: ObservableObject {
     func deleteDeployment(id: Int64) async {
         do {
             let databaseService = self.databaseService
+            let deployment = try await retryingDatabaseCall {
+                try databaseService.deployments().first { $0.id == id }
+            }
+            if !excelInventoryPath.isEmpty {
+                guard let deployment else {
+                    throw DatabaseError.stepFailed("Could not find the deployment row to remove from Excel.")
+                }
+                try excelSyncService.deleteDeployments([deployment], from: excelInventoryPath)
+            }
             try await retryingDatabaseCall { try databaseService.deleteDeployment(id: id) }
             try await syncRemainingInventoryIfNeeded()
+            persistExcelSyncMarker()
             await load()
         } catch {
             errorMessage = error.localizedDescription

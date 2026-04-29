@@ -78,6 +78,17 @@ def main():
             "deployedDate": "2026-03-01",
             "deployedLocation": "HQ",
             "notes": "Fixture deployment"
+        }, {
+            "itemType": "Peripheral",
+            "description": "Example Dock",
+            "manufacturer": "Example Manufacturer",
+            "partNumber": "DOCK-1",
+            "qtyDeployed": 1,
+            "deployedTo": "Example Desk",
+            "deployedBy": "Smoke Test",
+            "deployedDate": "2026-03-02",
+            "deployedLocation": "HQ",
+            "notes": "Linked fixture deployment"
         }]})
         run("update-remaining", workbook, {"items": [{
             "partNumber": "LAP-1",
@@ -89,6 +100,49 @@ def main():
         deployed = run("read-deployed", workbook, {})
         if len(inventory.get("items", [])) < 2 or len(deployed.get("deployments", [])) < 1:
             raise AssertionError("fixture workbook did not round-trip expected rows")
+        run("delete-deployed", workbook, {"deployments": [{
+            "itemType": "Laptop",
+            "description": "Example Laptop",
+            "manufacturer": "Example Manufacturer",
+            "partNumber": "LAP-1",
+            "qtyDeployed": 2,
+            "deployedTo": "Example Team",
+            "deployedBy": "Smoke Test",
+            "deployedDate": "2026-03-01",
+            "deployedLocation": "HQ",
+            "notes": "Fixture deployment"
+        }]})
+        run("delete-inventory", workbook, {"items": [{
+            "itemType": "Peripheral",
+            "description": "Example Dock",
+            "manufacturer": "Example Manufacturer",
+            "partNumber": "DOCK-1",
+            "purchaseDate": "2026-02-01",
+            "vendor": "Example Vendor",
+            "unitCost": 199,
+            "quantity": 3,
+            "qtyReceived": 3,
+            "poNumber": "PO-2",
+            "budgetType": "OpEx",
+            "notes": "Fixture"
+        }], "deployments": [{
+            "itemType": "Peripheral",
+            "description": "Example Dock",
+            "manufacturer": "Example Manufacturer",
+            "partNumber": "DOCK-1",
+            "qtyDeployed": 1,
+            "deployedTo": "Example Desk",
+            "deployedBy": "Smoke Test",
+            "deployedDate": "2026-03-02",
+            "deployedLocation": "HQ",
+            "notes": "Linked fixture deployment"
+        }]})
+        inventory_after_delete = run("read-inventory", workbook, {})
+        deployed_after_delete = run("read-deployed", workbook, {})
+        if any(item.get("partNumber") == "DOCK-1" for item in inventory_after_delete.get("items", [])):
+            raise AssertionError("delete-inventory did not remove the matching workbook row")
+        if deployed_after_delete.get("deployments", []):
+            raise AssertionError("delete-deployed did not remove the matching workbook row")
         print("import_fixture_smoke=ok")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

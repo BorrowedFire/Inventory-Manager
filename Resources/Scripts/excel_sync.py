@@ -9,6 +9,8 @@ Commands:
     append-inventory   - Append rows to the Inventory or OpEx sheet
     append-deployed    - Append rows to the Items Deployed sheet
     update-inventory   - Update an existing row in Inventory or OpEx
+    delete-inventory   - Delete existing rows from Inventory or OpEx
+    delete-deployed    - Delete existing rows from Items Deployed
     update-remaining   - Update REMAINING INVENTORY (col L) by part number
 """
 
@@ -224,6 +226,11 @@ def normalized_date(value):
     return str(parsed).strip().casefold()
 
 
+def normalized_quantity(value):
+    parsed = parse_int(value, default=None)
+    return "" if parsed is None else str(parsed)
+
+
 def sheet_for_budget(budget_type):
     return "OpEx" if normalized_text(budget_type) == "opex" else "Inventory"
 
@@ -250,7 +257,9 @@ def inventory_match_score(ws, row, item):
     return score
 
 
-def find_inventory_row(wb, item):
+def find_inventory_row(wb, item, minimum_score=3, early_return_score=5, used_rows=None):
+    if used_rows is None:
+        used_rows = set()
     preferred_sheet = sheet_for_budget(item.get("budgetType", "Capital"))
     search_order = [preferred_sheet] + [name for name in ["Inventory", "OpEx"] if name != preferred_sheet]
 
@@ -265,16 +274,18 @@ def find_inventory_row(wb, item):
         last_row = find_last_data_row(ws)
 
         for row in range(2, last_row + 1):
+            if (sheet_name, row) in used_rows:
+                continue
             if not has_row_content(ws, row, [1, 2, 3, 4, 6, 11]):
                 continue
             score = inventory_match_score(ws, row, item)
             if score > best_score:
                 best_match = (sheet_name, row)
                 best_score = score
-            if score >= 5:
+            if score >= early_return_score:
                 return (sheet_name, row)
 
-    return best_match if best_score >= 3 else None
+    return best_match if best_score >= minimum_score else None
 
 
 def write_inventory_row(ws, row, item):
@@ -344,6 +355,121 @@ def update_inventory(wb, data, filepath):
 
     wb.save(filepath)
     return {"success": True, "rowsUpdated": 1}
+
+
+def delete_inventory(wb, data, filepath):
+    """Delete inventory rows from their workbook sheet before SQLite removes them."""
+    items = data.get("items", [])
+    deployments = data.get("deployments", [])
+    if not items:
+        return {"success": True, "rowsDeleted": 0}
+
+    matches = []
+    used_rows = set()
+    for item in items:
+        match = find_inventory_row(wb, item, minimum_score=5, early_return_score=5, used_rows=used_rows)
+        if not match:
+            identity = item.get("partNumber") or item.get("description") or "inventory row"
+            return {"success": False, "error": f"Could not locate inventory row in Excel for deletion: {identity}"}
+        used_rows.add(match)
+        matches.append(match)
+
+    deployment_matches = []
+    used_deployment_rows = set()
+    for deployment in deployments:
+        match = find_deployment_row(wb, deployment, used_rows=used_deployment_rows)
+        if not match:
+            identity = deployment.get("partNumber") or deployment.get("description") or "deployment row"
+            return {"success": False, "error": f"Could not locate linked deployment row in Excel for deletion: {identity}"}
+        used_deployment_rows.add(match)
+        deployment_matches.append(match)
+
+    for sheet_name, row in sorted(deployment_matches, key=lambda value: (value[0], value[1]), reverse=True):
+        wb[sheet_name].delete_rows(row, 1)
+
+    for sheet_name, row in sorted(matches, key=lambda value: (value[0], value[1]), reverse=True):
+        wb[sheet_name].delete_rows(row, 1)
+
+    wb.save(filepath)
+    return {"success": True, "rowsDeleted": len(matches), "deploymentRowsDeleted": len(deployment_matches)}
+
+
+def deployment_match_score(ws, row, deployment):
+    score = 0
+    checks = [
+        (1, normalized_text(deployment.get("itemType", ""))),
+        (2, normalized_text(deployment.get("description", ""))),
+        (3, normalized_text(deployment.get("manufacturer", ""))),
+        (4, normalized_text(deployment.get("partNumber", ""))),
+        (5, normalized_quantity(deployment.get("qtyDeployed", ""))),
+        (6, normalized_text(deployment.get("deployedTo", ""))),
+        (7, normalized_text(deployment.get("deployedBy", ""))),
+        (8, normalized_date(deployment.get("deployedDate", ""))),
+        (9, normalized_text(deployment.get("deployedLocation", ""))),
+    ]
+
+    for column, expected in checks:
+        actual_value = ws.cell(row=row, column=column).value
+        if column == 5:
+            actual = normalized_quantity(actual_value)
+        elif column == 8:
+            actual = normalized_date(actual_value)
+        else:
+            actual = normalized_text(actual_value)
+        if expected and actual == expected:
+            score += 1
+
+    return score
+
+
+def find_deployment_row(wb, deployment, used_rows=None):
+    if used_rows is None:
+        used_rows = set()
+    sheet_name = "Items Deployed"
+    if sheet_name not in wb.sheetnames:
+        return None
+
+    ws = wb[sheet_name]
+    last_row = find_last_data_row(ws)
+    best_match = None
+    best_score = 0
+
+    for row in range(2, last_row + 1):
+        if (sheet_name, row) in used_rows:
+            continue
+        if not has_row_content(ws, row, [1, 2, 3, 4, 6, 7, 9]):
+            continue
+        score = deployment_match_score(ws, row, deployment)
+        if score > best_score:
+            best_match = (sheet_name, row)
+            best_score = score
+        if score >= 6:
+            return (sheet_name, row)
+
+    return best_match if best_score >= 5 else None
+
+
+def delete_deployed(wb, data, filepath):
+    """Delete deployment rows from the workbook so auto-sync cannot recreate them."""
+    deployments = data.get("deployments", [])
+    if not deployments:
+        return {"success": True, "rowsDeleted": 0}
+
+    matches = []
+    used_rows = set()
+    for deployment in deployments:
+        match = find_deployment_row(wb, deployment, used_rows=used_rows)
+        if not match:
+            identity = deployment.get("partNumber") or deployment.get("description") or "deployment row"
+            return {"success": False, "error": f"Could not locate deployment row in Excel for deletion: {identity}"}
+        used_rows.add(match)
+        matches.append(match)
+
+    for sheet_name, row in sorted(matches, key=lambda value: (value[0], value[1]), reverse=True):
+        wb[sheet_name].delete_rows(row, 1)
+
+    wb.save(filepath)
+    return {"success": True, "rowsDeleted": len(matches)}
 
 
 def append_deployed(wb, data, filepath):
@@ -585,6 +711,10 @@ def main():
             result = append_deployed(wb, data, filepath)
         elif command == "update-inventory":
             result = update_inventory(wb, data, filepath)
+        elif command == "delete-inventory":
+            result = delete_inventory(wb, data, filepath)
+        elif command == "delete-deployed":
+            result = delete_deployed(wb, data, filepath)
         elif command == "update-remaining":
             result = update_remaining(wb, data, filepath)
         elif command == "read-inventory":
