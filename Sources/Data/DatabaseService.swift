@@ -730,6 +730,28 @@ final class DatabaseService: @unchecked Sendable {
         }
     }
 
+    func deleteAnnualBudget(year: String, budgetType: String) throws {
+        let trimmedYear = year.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedType = budgetType.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let yearValue = Int(trimmedYear), !trimmedType.isEmpty else { return }
+
+        try withTransaction { db in
+            try execute(
+                "DELETE FROM annual_budgets WHERE year = ? AND lower(budgetType) = lower(?)",
+                bindings: [.int(yearValue), .text(trimmedType)],
+                db: db
+            )
+            try insertAudit(
+                action: "delete",
+                entityType: "budget",
+                entityId: 0,
+                details: "Deleted \(trimmedYear) \(trimmedType) budget target",
+                performedBy: NSUserName(),
+                db: db
+            )
+        }
+    }
+
     func stockrooms() throws -> [StockroomRecord] {
         try query(
             """
@@ -979,6 +1001,34 @@ final class DatabaseService: @unchecked Sendable {
         try insertAudit(action: "edit", entityType: "item", entityId: item.id, details: "Updated \(item.partNumber) \(item.description)", performedBy: NSUserName())
     }
 
+    func deleteInventoryItem(id: Int64) throws {
+        try withTransaction { db in
+            let rows = try query(
+                """
+                SELECT COALESCE(partNumber, '') AS partNumber, COALESCE(description, '') AS description
+                FROM inventory_items
+                WHERE id = ?
+                LIMIT 1
+                """,
+                bindings: [.int64(id)],
+                db: db
+            )
+
+            guard let existing = rows.first else { return }
+
+            try execute("DELETE FROM deployments WHERE inventoryItemId = ?", bindings: [.int64(id)], db: db)
+            try execute("DELETE FROM inventory_items WHERE id = ?", bindings: [.int64(id)], db: db)
+            try insertAudit(
+                action: "delete",
+                entityType: "item",
+                entityId: id,
+                details: "Deleted \(existing.string(named: "partNumber")) \(existing.string(named: "description"))",
+                performedBy: NSUserName(),
+                db: db
+            )
+        }
+    }
+
     func inventoryItem(id: Int64) throws -> InventoryItemRecord? {
         try query(
             """
@@ -1058,6 +1108,33 @@ final class DatabaseService: @unchecked Sendable {
                 entityType: "deployment",
                 entityId: id,
                 details: "Returned \(existing.string(named: "partNumber")) from \(existing.string(named: "deployedTo"))",
+                performedBy: NSUserName(),
+                db: db
+            )
+        }
+    }
+
+    func deleteDeployment(id: Int64) throws {
+        try withTransaction { db in
+            let rows = try query(
+                """
+                SELECT id, partNumber, COALESCE(description, '') AS description, COALESCE(deployedTo, '') AS deployedTo
+                FROM deployments
+                WHERE id = ?
+                LIMIT 1
+                """,
+                bindings: [.int64(id)],
+                db: db
+            )
+
+            guard let existing = rows.first else { return }
+
+            try execute("DELETE FROM deployments WHERE id = ?", bindings: [.int64(id)], db: db)
+            try insertAudit(
+                action: "delete",
+                entityType: "deployment",
+                entityId: id,
+                details: "Deleted deployment for \(existing.string(named: "partNumber")) to \(existing.string(named: "deployedTo"))",
                 performedBy: NSUserName(),
                 db: db
             )

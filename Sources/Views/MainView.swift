@@ -22,10 +22,13 @@ private final class PDFDropCollector: @unchecked Sendable {
 struct MainView: View {
     @ObservedObject var model: AppModel
     @State private var inventoryEditorItem: InventoryItemRecord?
+    @State private var inventoryToDelete: InventoryItemRecord?
     @State private var deploymentToReturn: DeploymentRecord?
+    @State private var deploymentToDelete: DeploymentRecord?
     @State private var deploymentDraft: DeploymentSheetModel?
     @State private var stockroomDraft: StockroomDraft?
     @State private var stockroomToDelete: StockroomRecord?
+    @State private var budgetToDelete: AnnualBudgetRecord?
     @State private var showOnboarding = false
     @State private var showInstallGuide = false
     @State private var budgetCategoryTypeSelection = "Capital"
@@ -151,6 +154,25 @@ struct MainView: View {
             )
         }
         .confirmationDialog(
+            "Delete inventory item?",
+            isPresented: Binding(
+                get: { inventoryToDelete != nil },
+                set: { if !$0 { inventoryToDelete = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete Inventory Item", role: .destructive) {
+                guard let item = inventoryToDelete else { return }
+                Task {
+                    await model.deleteInventoryItem(id: item.id)
+                    inventoryToDelete = nil
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes the inventory row and any deployment rows linked to it.")
+        }
+        .confirmationDialog(
             "Delete stockroom?",
             isPresented: Binding(
                 get: { stockroomToDelete != nil },
@@ -168,6 +190,25 @@ struct MainView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Items in this stockroom will become unassigned.")
+        }
+        .confirmationDialog(
+            "Delete saved budget?",
+            isPresented: Binding(
+                get: { budgetToDelete != nil },
+                set: { if !$0 { budgetToDelete = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete Budget", role: .destructive) {
+                guard let budget = budgetToDelete else { return }
+                Task {
+                    await model.deleteAnnualBudget(record: budget)
+                    budgetToDelete = nil
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(budgetToDelete.map { "Remove the saved \($0.year) \($0.budgetType) budget target." } ?? "")
         }
     }
 
@@ -515,6 +556,25 @@ struct MainView: View {
         } message: {
             Text(deploymentToReturn?.description ?? "")
         }
+        .confirmationDialog(
+            "Delete deployment?",
+            isPresented: Binding(
+                get: { deploymentToDelete != nil },
+                set: { if !$0 { deploymentToDelete = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete Deployment", role: .destructive) {
+                guard let deployment = deploymentToDelete else { return }
+                Task {
+                    await model.deleteDeployment(id: deployment.id)
+                    deploymentToDelete = nil
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes the deployment row and restores that quantity to available inventory.")
+        }
     }
 
     private var inventoryTable: some View {
@@ -570,10 +630,13 @@ struct MainView: View {
                         deploymentDraft = DeploymentSheetModel(item: item)
                     }
                     .disabled(item.availableQuantity <= 0)
+                    Button("Delete", role: .destructive) {
+                        inventoryToDelete = item
+                    }
                 }
                 .buttonStyle(.borderless)
             }
-            .width(130)
+            .width(190)
         }
     }
 
@@ -613,12 +676,17 @@ struct MainView: View {
             TableColumn("Location", value: \.deployedLocation)
                 .width(min: 120, ideal: 160)
             TableColumn("Actions") { deployment in
-                Button("Return") {
-                    deploymentToReturn = deployment
+                HStack(spacing: 8) {
+                    Button("Return") {
+                        deploymentToReturn = deployment
+                    }
+                    Button("Delete", role: .destructive) {
+                        deploymentToDelete = deployment
+                    }
                 }
                 .buttonStyle(.borderless)
             }
-            .width(90)
+            .width(140)
         }
     }
 
@@ -1725,10 +1793,11 @@ struct MainView: View {
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 120)
             Button(role: .destructive) {
-                model.removeAnnualBudgetRecord(id: record.wrappedValue.id)
+                budgetToDelete = record.wrappedValue
             } label: {
                 Image(systemName: "trash")
             }
+            .help("Delete this saved budget row")
             .buttonStyle(.borderless)
         }
         .font(.system(size: 13, weight: .medium, design: .rounded))

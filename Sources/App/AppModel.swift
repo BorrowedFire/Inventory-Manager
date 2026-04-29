@@ -328,10 +328,35 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func deleteInventoryItem(id: Int64) async {
+        do {
+            let databaseService = self.databaseService
+            try await retryingDatabaseCall { try databaseService.deleteInventoryItem(id: id) }
+            if selectedInventoryID == id {
+                selectedInventoryID = nil
+            }
+            try await syncRemainingInventoryIfNeeded()
+            await load()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func returnDeployment(id: Int64) async {
         do {
             let databaseService = self.databaseService
             try await retryingDatabaseCall { try databaseService.returnDeployment(id: id) }
+            try await syncRemainingInventoryIfNeeded()
+            await load()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func deleteDeployment(id: Int64) async {
+        do {
+            let databaseService = self.databaseService
+            try await retryingDatabaseCall { try databaseService.deleteDeployment(id: id) }
             try await syncRemainingInventoryIfNeeded()
             await load()
         } catch {
@@ -814,6 +839,17 @@ final class AppModel: ObservableObject {
             let databaseService = self.databaseService
             let records = annualBudgetRecords
             try await retryingDatabaseCall { try databaseService.saveAnnualBudgets(records) }
+            await load()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func deleteAnnualBudget(record: AnnualBudgetRecord) async {
+        do {
+            annualBudgetRecords.removeAll { $0.id == record.id }
+            let databaseService = self.databaseService
+            try await retryingDatabaseCall { try databaseService.deleteAnnualBudget(year: record.year, budgetType: record.budgetType) }
             await load()
         } catch {
             errorMessage = error.localizedDescription

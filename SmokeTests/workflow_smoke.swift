@@ -73,6 +73,21 @@ struct Runner {
         })
         print("deploy=\(newDeployment != nil ? "ok" : "fail")")
 
+        var deploymentToDelete: DeploymentRecord?
+        if let newDeployment {
+            try service.deploy(draft)
+            deploymentToDelete = try service.deployments().first(where: {
+                $0.deployedTo == "Smoke Test User" && $0.partNumber == firstItem.partNumber && $0.id != newDeployment.id
+            })
+            if let deploymentToDelete {
+                try service.deleteDeployment(id: deploymentToDelete.id)
+            }
+        }
+        let deletedDeployment = deploymentToDelete.flatMap { deleted in
+            try? service.deployments().first(where: { $0.id == deleted.id })
+        }
+        print("deleteDeployment=\(deletedDeployment == nil ? "ok" : "fail")")
+
         if let newDeployment {
             try service.returnDeployment(id: newDeployment.id)
         }
@@ -103,6 +118,19 @@ struct Runner {
 
         let duplicateResult = try service.insertParsedItems([parsed])
         print("insertParsedItems.duplicateSkipped=\(duplicateResult.skippedCount)")
+
+        if let parsedItem = try service.inventoryItems().first(where: { $0.partNumber == parsed.partNumber }) {
+            try service.deleteInventoryItem(id: parsedItem.id)
+            let deletedItem = try service.inventoryItems().first(where: { $0.id == parsedItem.id })
+            print("deleteInventoryItem=\(deletedItem == nil ? "ok" : "fail")")
+        }
+
+        try service.saveAnnualBudgets([
+            AnnualBudgetRecord(year: "2026", budgetType: "Capital", allocatedBudget: "1000", fundCode: "FUND", glCode: "GL")
+        ])
+        try service.deleteAnnualBudget(year: "2026", budgetType: "Capital")
+        let deletedBudget = try service.budgetDashboard().annualBudgets.first(where: { $0.year == "2026" && $0.budgetType == "Capital" })
+        print("deleteAnnualBudget=\(deletedBudget == nil ? "ok" : "fail")")
 
         let remaining = try service.remainingInventorySnapshots()
         print("remainingSnapshots.count=\(remaining.count)")
