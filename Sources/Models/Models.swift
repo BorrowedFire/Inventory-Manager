@@ -213,6 +213,11 @@ struct DeploymentRecord: Identifiable, Hashable, Sendable {
     let qtyDeployed: Int
     let stockroomName: String
     let notes: String
+    let returnedAt: String
+    let returnedBy: String
+
+    var isReturned: Bool { !returnedAt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    var statusLabel: String { isReturned ? "Returned" : "Active" }
 }
 
 struct StockroomRecord: Identifiable, Hashable, Sendable {
@@ -309,6 +314,7 @@ struct ParsedImportItem: Identifiable, Hashable, Sendable {
     var poNumber: String
     var notes: String
     var budgetType: String
+    var stockroomId: Int64? = nil
 }
 
 struct WorkspaceChecklistItem: Identifiable, Hashable, Sendable {

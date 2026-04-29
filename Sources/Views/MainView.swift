@@ -80,6 +80,18 @@ struct MainView: View {
             showInstallGuide = InstallHelper.shouldPromptForApplicationsInstall
             showOnboarding = model.shouldPresentOnboarding && !showInstallGuide
         }
+        .onChange(of: model.commandRequestID) { _ in
+            switch model.commandRequest {
+            case .newInventoryItem:
+                inventoryEditorItem = AppModel.blankInventoryItem(stockroomId: model.selectedStockroomID)
+                model.selectedSection = .inventory
+            case .createStockroom:
+                stockroomDraft = StockroomDraft()
+                model.selectedSection = .stockrooms
+            case .none:
+                break
+            }
+        }
         .sheet(isPresented: $showInstallGuide, onDismiss: {
             showOnboarding = model.shouldPresentOnboarding
         }) {
@@ -104,7 +116,11 @@ struct MainView: View {
                 itemTypeOptions: model.editableItemTypeOptions
             ) { updatedItem in
                 Task {
-                    await model.saveInventory(updatedItem, originalItem: item)
+                    if item.id == 0 {
+                        await model.createInventory(updatedItem)
+                    } else {
+                        await model.saveInventory(updatedItem, originalItem: item)
+                    }
                     inventoryEditorItem = nil
                 }
             }
@@ -483,6 +499,11 @@ struct MainView: View {
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .foregroundStyle(AppTheme.muted)
                 Spacer()
+                Button("New Item") {
+                    inventoryEditorItem = AppModel.blankInventoryItem(stockroomId: model.selectedStockroomID)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(AppTheme.blue)
                 Button("Deployments") {
                     model.openDeploymentsDrilldown()
                 }
@@ -572,9 +593,10 @@ struct MainView: View {
                     self.deploymentToReturn = nil
                 }
             }
+            .disabled(deploymentToReturn?.isReturned == true)
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text(deploymentToReturn?.description ?? "")
+            Text(deploymentToReturn.map { "Mark \($0.description) as returned while keeping it in deployment history." } ?? "")
         }
         .confirmationDialog(
             "Delete deployment?",
@@ -695,11 +717,24 @@ struct MainView: View {
                 .width(min: 110, ideal: 130)
             TableColumn("Location", value: \.deployedLocation)
                 .width(min: 120, ideal: 160)
+            TableColumn("Status") { deployment in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(deployment.statusLabel)
+                        .foregroundStyle(deployment.isReturned ? AppTheme.muted : AppTheme.teal)
+                    if deployment.isReturned {
+                        Text(deployment.returnedAt)
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.muted)
+                    }
+                }
+            }
+            .width(min: 110, ideal: 150)
             TableColumn("Actions") { deployment in
                 HStack(spacing: 8) {
                     Button("Return") {
                         deploymentToReturn = deployment
                     }
+                    .disabled(deployment.isReturned)
                     Button("Delete", role: .destructive) {
                         deploymentToDelete = deployment
                     }
@@ -785,6 +820,9 @@ struct MainView: View {
                             Button("Open in Inventory") {
                                 model.openInventoryDrilldown(stockroom: stockroom.name)
                             }
+                            Button("New Item Here") {
+                                inventoryEditorItem = AppModel.blankInventoryItem(stockroomId: stockroom.id)
+                            }
                         }
 
                         ScrollView {
@@ -863,7 +901,7 @@ struct MainView: View {
                     .onDrop(of: [UTType.pdf.identifier], isTargeted: nil, perform: handlePDFDrop)
                 } else {
                     ForEach($model.parsedImportItems) { $item in
-                        ParsedImportEditor(item: $item)
+                        ParsedImportEditor(item: $item, stockrooms: model.stockrooms)
                     }
                 }
             }
@@ -1013,6 +1051,11 @@ struct MainView: View {
                             Task { await model.importFromExcel() }
                         }
                         .disabled(model.excelInventoryPath.isEmpty)
+                        Button("Import CSV") {
+                            if let url = FileDialogs.chooseCSVFile() {
+                                Task { await model.importFromCSV(url: url) }
+                            }
+                        }
                         Button("Preview Import") {
                             Task { await model.previewExcelImport() }
                         }
@@ -1189,6 +1232,10 @@ struct MainView: View {
                     stockroomDraft = StockroomDraft()
                 }
                 .disabled(!model.stockrooms.isEmpty)
+
+                Button("New Inventory Item") {
+                    inventoryEditorItem = AppModel.blankInventoryItem(stockroomId: model.selectedStockroomID)
+                }
 
                 Button("Open Workspace Settings") {
                     model.selectedSection = .settings
@@ -2115,9 +2162,9 @@ struct InventoryEditSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Edit Inventory Item")
+                    Text(item.id == 0 ? "New Inventory Item" : "Edit Inventory Item")
                         .font(.title2.bold())
-                    Text(draft.description)
+                    Text(draft.description.isEmpty ? "Create a manually-entered inventory row." : draft.description)
                         .foregroundStyle(AppTheme.muted)
                 }
                 Spacer()
@@ -2209,9 +2256,10 @@ struct InventoryEditor: View {
                 .padding(8)
                 .background(Color.white.opacity(0.55), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
 
-            Button("Save Changes", action: onSave)
+            Button(item.id == 0 ? "Create Item" : "Save Changes", action: onSave)
                 .buttonStyle(.borderedProminent)
                 .tint(AppTheme.blue)
+                .disabled(item.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
     }
 
@@ -2297,6 +2345,7 @@ struct DeploySheet: View {
 
 struct ParsedImportEditor: View {
     @Binding var item: ParsedImportItem
+    let stockrooms: [StockroomRecord]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -2309,6 +2358,16 @@ struct ParsedImportEditor: View {
                     Text("OpEx").tag("OpEx")
                 }
                 .frame(width: 140)
+                Picker("Stockroom", selection: Binding(
+                    get: { item.stockroomId ?? -1 },
+                    set: { item.stockroomId = $0 == -1 ? nil : $0 }
+                )) {
+                    Text("Unassigned").tag(Int64(-1))
+                    ForEach(stockrooms) { stockroom in
+                        Text(stockroom.name).tag(stockroom.id)
+                    }
+                }
+                .frame(width: 170)
             }
 
             HStack {

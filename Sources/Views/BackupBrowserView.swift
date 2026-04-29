@@ -4,6 +4,7 @@ struct BackupBrowserView: View {
     @ObservedObject var model: AppModel
     var limit: Int = 8
     @State private var backupToRestore: BackupRecord?
+    @State private var confirmPrune = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -12,7 +13,7 @@ struct BackupBrowserView: View {
                     .font(.headline)
                 Spacer()
                 Button("Refresh") { model.refreshBackupRecords() }
-                Button("Prune Old") { model.pruneOldBackups() }
+                Button("Prune Old") { confirmPrune = true }
                     .disabled(model.backupRecords.count <= 20)
             }
 
@@ -61,6 +62,18 @@ struct BackupBrowserView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text(backupToRestore.map { "Replace the current database with \($0.name). The current database will be backed up first." } ?? "")
+        }
+        .confirmationDialog(
+            "Prune old backups?",
+            isPresented: $confirmPrune,
+            titleVisibility: .visible
+        ) {
+            Button("Prune Old Backups", role: .destructive) {
+                model.pruneOldBackups()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Keep the 20 newest backups and move older backup files to the Trash.")
         }
     }
 }

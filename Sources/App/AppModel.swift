@@ -3,6 +3,11 @@ import Combine
 
 @MainActor
 final class AppModel: ObservableObject {
+    enum CommandRequest: String {
+        case newInventoryItem
+        case createStockroom
+    }
+
     private static let backupTimestampFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -77,6 +82,8 @@ final class AppModel: ObservableObject {
     @Published var parsedImportItems: [ParsedImportItem] = []
     @Published var users: [AppUserRecord] = []
     @Published var annualBudgetRecords: [AnnualBudgetRecord] = []
+    @Published var commandRequest: CommandRequest?
+    @Published var commandRequestID: Int = 0
 
     private var databaseService: DatabaseService
     private let excelSyncService = ExcelSyncService()
@@ -328,6 +335,28 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func createInventory(_ item: InventoryItemRecord) async {
+        do {
+            let databaseService = self.databaseService
+            _ = try await retryingDatabaseCall { try databaseService.createInventoryItem(item) }
+            if !excelInventoryPath.isEmpty {
+                let refreshedItems = try await retryingDatabaseCall { try databaseService.inventoryItems() }
+                if let createdItem = refreshedItems.first(where: {
+                    $0.partNumber == item.partNumber &&
+                    $0.description == item.description &&
+                    $0.poNumber == item.poNumber
+                }) {
+                    try excelSyncService.appendInventory([createdItem], to: excelInventoryPath)
+                    try await syncRemainingInventoryIfNeeded()
+                    persistExcelSyncMarker()
+                }
+            }
+            await load()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func deleteInventoryItem(id: Int64) async {
         do {
             let databaseService = self.databaseService
@@ -464,6 +493,25 @@ final class AppModel: ObservableObject {
             let summary = try await syncExcel(force: true)
             rememberImportUndoBackup(undoURL)
             lastImportSummary = "\(summary.inventoryImported) inventory imported, \(summary.inventoryUpdated) updated, \(summary.inventorySkipped) unchanged; \(summary.deploymentsImported) deployments imported, \(summary.deploymentsUpdated) updated, \(summary.deploymentsSkipped) unchanged."
+            await load()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func importFromCSV(url: URL) async {
+        do {
+            let undoURL = try await createImportUndoBackup(label: "csv")
+            let csvText = try String(contentsOf: url, encoding: .utf8)
+            let items = try Self.parseInventoryCSV(csvText)
+            guard !items.isEmpty else {
+                errorMessage = "No inventory rows found in the selected CSV."
+                return
+            }
+            let databaseService = self.databaseService
+            let summary = try await retryingDatabaseCall { try databaseService.importFromExcel(inventoryItems: items, deployments: []) }
+            rememberImportUndoBackup(undoURL)
+            lastImportSummary = "CSV import: \(summary.inventoryImported) inventory imported, \(summary.inventoryUpdated) updated, \(summary.inventorySkipped) unchanged."
             await load()
         } catch {
             errorMessage = error.localizedDescription
@@ -631,10 +679,10 @@ final class AppModel: ObservableObject {
         refreshBackupRecords()
         let removable = backupRecords.dropFirst(max(keepCount, 0))
         for backup in removable {
-            try? FileManager.default.removeItem(at: backup.url)
+            try? FileManager.default.trashItem(at: backup.url, resultingItemURL: nil)
         }
         refreshBackupRecords()
-        lastImportSummary = removable.isEmpty ? "No old backups to prune." : "Pruned \(removable.count) old backup(s)."
+        lastImportSummary = removable.isEmpty ? "No old backups to prune." : "Moved \(removable.count) old backup(s) to the Trash."
     }
 
     func restoreBackup(_ backup: BackupRecord) async {
@@ -886,6 +934,120 @@ final class AppModel: ObservableObject {
 
     func removeAnnualBudgetRecord(id: UUID) {
         annualBudgetRecords.removeAll { $0.id == id }
+    }
+
+    func requestCommand(_ command: CommandRequest) {
+        commandRequest = command
+        commandRequestID += 1
+    }
+
+    static func blankInventoryItem(stockroomId: Int64? = nil) -> InventoryItemRecord {
+        InventoryItemRecord(
+            id: 0,
+            itemType: "Laptop",
+            description: "",
+            manufacturer: "",
+            partNumber: "",
+            purchaseDate: DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .none),
+            vendor: "",
+            unitCost: 0,
+            quantity: 1,
+            qtyReceived: 1,
+            poNumber: "",
+            notes: "",
+            budgetType: "Capital",
+            stockroomId: stockroomId,
+            stockroomName: "Unassigned",
+            availableQuantity: 1,
+            updatedAt: ""
+        )
+    }
+
+    private static func parseInventoryCSV(_ text: String) throws -> [ImportedInventoryItem] {
+        let rows = parseCSVRows(text)
+        guard let header = rows.first else { return [] }
+        let headerMap = Dictionary(uniqueKeysWithValues: header.enumerated().map { index, name in
+            (name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(), index)
+        })
+
+        func value(_ row: [String], _ names: [String]) -> String {
+            for name in names {
+                if let index = headerMap[name.lowercased()], index < row.count {
+                    return row[index].trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+            }
+            return ""
+        }
+
+        return rows.dropFirst().compactMap { row in
+            guard row.contains(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else { return nil }
+            let quantity = Int(value(row, ["quantity", "qty", "purchase quantity"])) ?? 0
+            let qtyReceived = Int(value(row, ["qty received", "received", "quantity received"])) ?? quantity
+            let unitCost = Double(value(row, ["unit cost", "cost", "cost per item"]).replacingOccurrences(of: "$", with: "").replacingOccurrences(of: ",", with: "")) ?? 0
+            return ImportedInventoryItem(
+                itemType: value(row, ["item type", "type"]),
+                description: value(row, ["description", "item"]),
+                manufacturer: value(row, ["manufacturer", "mfg"]),
+                partNumber: value(row, ["part number", "partnumber", "part"]),
+                purchaseDate: value(row, ["purchase date", "date"]),
+                vendor: value(row, ["vendor"]),
+                unitCost: unitCost,
+                quantity: quantity,
+                qtyReceived: qtyReceived,
+                poNumber: value(row, ["po number", "po", "purchase order"]),
+                notes: value(row, ["notes"]),
+                budgetType: value(row, ["budget type", "budget"]).isEmpty ? "Capital" : value(row, ["budget type", "budget"])
+            )
+        }
+    }
+
+    private static func parseCSVRows(_ text: String) -> [[String]] {
+        var rows: [[String]] = []
+        var row: [String] = []
+        var field = ""
+        var inQuotes = false
+        var iterator = text.makeIterator()
+
+        while let character = iterator.next() {
+            if character == "\"" {
+                if inQuotes, let next = iterator.next() {
+                    if next == "\"" {
+                        field.append("\"")
+                    } else {
+                        inQuotes = false
+                        if next == "," {
+                            row.append(field)
+                            field = ""
+                        } else if next == "\n" {
+                            row.append(field)
+                            rows.append(row)
+                            row = []
+                            field = ""
+                        } else if next != "\r" {
+                            field.append(next)
+                        }
+                    }
+                } else {
+                    inQuotes.toggle()
+                }
+            } else if character == ",", !inQuotes {
+                row.append(field)
+                field = ""
+            } else if character == "\n", !inQuotes {
+                row.append(field)
+                rows.append(row)
+                row = []
+                field = ""
+            } else if character != "\r" {
+                field.append(character)
+            }
+        }
+
+        if !field.isEmpty || !row.isEmpty {
+            row.append(field)
+            rows.append(row)
+        }
+        return rows
     }
 
     private func retryingDatabaseCall<T: Sendable>(attempts: Int = 4, operation: @escaping @Sendable () throws -> T) async throws -> T {

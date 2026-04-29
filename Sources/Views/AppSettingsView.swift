@@ -78,6 +78,11 @@ struct AppSettingsView: View {
                         Task { await model.importFromExcel() }
                     }
                     .disabled(model.excelInventoryPath.isEmpty)
+                    Button("Import CSV") {
+                        if let url = FileDialogs.chooseCSVFile() {
+                            Task { await model.importFromCSV(url: url) }
+                        }
+                    }
                     Button("Undo Last Import") {
                         Task { await model.undoLastImport() }
                     }

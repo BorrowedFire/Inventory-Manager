@@ -73,6 +73,17 @@ struct Runner {
         })
         print("deploy=\(newDeployment != nil ? "ok" : "fail")")
 
+        var invalidReducedQuantity = firstItem
+        invalidReducedQuantity.quantity = 0
+        let reductionBlocked: Bool
+        do {
+            try service.updateInventoryItem(invalidReducedQuantity)
+            reductionBlocked = false
+        } catch {
+            reductionBlocked = true
+        }
+        print("blockQuantityBelowActiveDeployments=\(reductionBlocked ? "ok" : "fail")")
+
         var deploymentToDelete: DeploymentRecord?
         if let newDeployment {
             try service.deploy(draft)
@@ -95,7 +106,10 @@ struct Runner {
         let returnedDeployment = try service.deployments().first(where: {
             $0.deployedTo == "Smoke Test User" && $0.partNumber == firstItem.partNumber
         })
-        print("returnDeployment=\(returnedDeployment == nil ? "ok" : "fail")")
+        print("returnDeploymentPreservesHistory=\(returnedDeployment?.isReturned == true ? "ok" : "fail")")
+
+        let afterReturnItem = try service.inventoryItems().first(where: { $0.id == firstItem.id })
+        print("returnDeploymentRestoresAvailability=\(afterReturnItem?.availableQuantity == firstItem.quantity ? "ok" : "fail")")
 
         let parsed = ParsedImportItem(
             sourceFile: "smoke.pdf",
@@ -143,6 +157,29 @@ struct Runner {
         print("createStockroom=\(createdStockroom != nil ? "ok" : "fail")")
 
         if let createdStockroom {
+            let manual = InventoryItemRecord(
+                id: 0,
+                itemType: "Tablet",
+                description: "Manual Smoke Item",
+                manufacturer: "SmokeCo",
+                partNumber: "MANUAL-SMOKE-\(smokeSuffix)",
+                purchaseDate: "04/06/2026",
+                vendor: "SmokeVendor",
+                unitCost: 25,
+                quantity: 1,
+                qtyReceived: 1,
+                poNumber: "PO-MANUAL-\(smokeSuffix)",
+                notes: "manual create smoke",
+                budgetType: "OpEx",
+                stockroomId: createdStockroom.id,
+                stockroomName: createdStockroom.name,
+                availableQuantity: 1,
+                updatedAt: ""
+            )
+            let manualID = try service.createInventoryItem(manual)
+            let manualItem = try service.inventoryItems().first(where: { $0.id == manualID })
+            print("createInventoryItem=\(manualItem?.stockroomId == createdStockroom.id ? "ok" : "fail")")
+
             try service.updateStockroom(id: createdStockroom.id, name: "Smoke Stockroom Updated", location: "HQ", department: "Operations")
             let updatedStockroom = try service.stockrooms().first(where: { $0.id == createdStockroom.id })
             print("updateStockroom=\(updatedStockroom?.name == "Smoke Stockroom Updated" ? "ok" : "fail")")
