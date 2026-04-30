@@ -6,6 +6,7 @@ final class AppModel: ObservableObject {
     enum CommandRequest: String {
         case newInventoryItem
         case createStockroom
+        case reportProblem
     }
 
     private static let backupTimestampFormatter: DateFormatter = {
@@ -373,6 +374,7 @@ final class AppModel: ObservableObject {
     func deleteInventoryItem(id: Int64) async {
         var excelRollbackURL: URL?
         var excelWorkbookMutated = false
+        var databaseDeleteSucceeded = false
 
         do {
             let databaseService = self.databaseService
@@ -391,6 +393,7 @@ final class AppModel: ObservableObject {
                 excelWorkbookMutated = true
             }
             try await retryingDatabaseCall { try databaseService.deleteInventoryItem(id: id) }
+            databaseDeleteSucceeded = true
             if selectedInventoryID == id {
                 selectedInventoryID = nil
             }
@@ -399,9 +402,10 @@ final class AppModel: ObservableObject {
             removeExcelWorkbookRollbackBackup(excelRollbackURL)
             await load()
         } catch {
-            errorMessage = await restoreExcelWorkbookIfNeeded(
+            errorMessage = await recoverExcelWorkbookAfterDeleteFailure(
                 from: excelRollbackURL,
                 workbookWasMutated: excelWorkbookMutated,
+                databaseDeleteSucceeded: databaseDeleteSucceeded,
                 originalError: error
             )
         }
@@ -448,6 +452,7 @@ final class AppModel: ObservableObject {
     func deleteDeployment(id: Int64) async {
         var excelRollbackURL: URL?
         var excelWorkbookMutated = false
+        var databaseDeleteSucceeded = false
 
         do {
             let databaseService = self.databaseService
@@ -463,14 +468,16 @@ final class AppModel: ObservableObject {
                 excelWorkbookMutated = true
             }
             try await retryingDatabaseCall { try databaseService.deleteDeployment(id: id) }
+            databaseDeleteSucceeded = true
             try await syncRemainingInventoryIfNeeded()
             persistExcelSyncMarker()
             removeExcelWorkbookRollbackBackup(excelRollbackURL)
             await load()
         } catch {
-            errorMessage = await restoreExcelWorkbookIfNeeded(
+            errorMessage = await recoverExcelWorkbookAfterDeleteFailure(
                 from: excelRollbackURL,
                 workbookWasMutated: excelWorkbookMutated,
+                databaseDeleteSucceeded: databaseDeleteSucceeded,
                 originalError: error
             )
         }
@@ -735,6 +742,20 @@ final class AppModel: ObservableObject {
         try? FileManager.default.removeItem(at: rollbackURL)
     }
 
+    private func recoverExcelWorkbookAfterDeleteFailure(from rollbackURL: URL?, workbookWasMutated: Bool, databaseDeleteSucceeded: Bool, originalError: Error) async -> String {
+        guard !databaseDeleteSucceeded else {
+            removeExcelWorkbookRollbackBackup(rollbackURL)
+            AppLog.excelSync.error("Delete completed before Excel remaining sync failure: \(originalError.localizedDescription, privacy: .public)")
+            return "\(originalError.localizedDescription) The row was deleted, but remaining inventory sync did not finish. Run Sync Remaining Inventory after resolving the workbook issue."
+        }
+
+        return await restoreExcelWorkbookIfNeeded(
+            from: rollbackURL,
+            workbookWasMutated: workbookWasMutated,
+            originalError: originalError
+        )
+    }
+
     private func restoreExcelWorkbookIfNeeded(from rollbackURL: URL?, workbookWasMutated: Bool, originalError: Error) async -> String {
         guard workbookWasMutated, let rollbackURL else {
             removeExcelWorkbookRollbackBackup(rollbackURL)
@@ -851,20 +872,61 @@ final class AppModel: ObservableObject {
         do {
             let fileManager = FileManager.default
             let targetURL = databaseURL
-            let backupURL = targetURL.deletingLastPathComponent().appendingPathComponent("InventoryData-before-restore-\(Int(Date().timeIntervalSince1970)).sqlite")
-            if fileManager.fileExists(atPath: targetURL.path) {
-                try fileManager.copyItem(at: targetURL, to: backupURL)
-                try fileManager.removeItem(at: targetURL)
+            guard sourceURL.path != targetURL.path else {
+                throw DatabaseError.stepFailed("Choose a backup database file that is different from the active workspace database.")
             }
-            try fileManager.copyItem(at: sourceURL, to: targetURL)
+
+            try fileManager.createDirectory(at: targetURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let backupURL = targetURL.deletingLastPathComponent().appendingPathComponent("InventoryData-before-restore-\(Int(Date().timeIntervalSince1970)).sqlite")
+            let restoreCandidateURL = targetURL
+                .deletingLastPathComponent()
+                .appendingPathComponent(".\(targetURL.lastPathComponent).restore-\(UUID().uuidString)")
+            var createdPreRestoreBackup = false
+            try fileManager.copyItem(at: sourceURL, to: restoreCandidateURL)
+            do {
+                if fileManager.fileExists(atPath: targetURL.path) {
+                    try await writeDatabaseBackup(to: backupURL)
+                    createdPreRestoreBackup = true
+                }
+                try removeSQLiteDatabaseFiles(at: targetURL)
+                try fileManager.moveItem(at: restoreCandidateURL, to: targetURL)
+            } catch {
+                try? fileManager.removeItem(at: restoreCandidateURL)
+                throw error
+            }
+            try removeSQLiteSidecars(for: targetURL)
             databaseService = DatabaseService(databaseURL: targetURL)
             selectedInventoryID = nil
             selectedStockroomID = nil
-            lastImportSummary = "Database restored. Previous database backed up as \(backupURL.lastPathComponent)."
+            lastImportSummary = createdPreRestoreBackup
+                ? "Database restored. Previous database backed up as \(backupURL.lastPathComponent)."
+                : "Database restored."
             await load()
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func sqliteSidecarURLs(for url: URL) -> [URL] {
+        [
+            URL(fileURLWithPath: url.path + "-wal"),
+            URL(fileURLWithPath: url.path + "-shm")
+        ]
+    }
+
+    private func removeSQLiteSidecars(for url: URL) throws {
+        let fileManager = FileManager.default
+        for sidecarURL in sqliteSidecarURLs(for: url) where fileManager.fileExists(atPath: sidecarURL.path) {
+            try fileManager.removeItem(at: sidecarURL)
+        }
+    }
+
+    private func removeSQLiteDatabaseFiles(at url: URL) throws {
+        let fileManager = FileManager.default
+        if fileManager.fileExists(atPath: url.path) {
+            try fileManager.removeItem(at: url)
+        }
+        try removeSQLiteSidecars(for: url)
     }
 
     func exportBlankInventoryTemplateCSV(to url: URL) async {

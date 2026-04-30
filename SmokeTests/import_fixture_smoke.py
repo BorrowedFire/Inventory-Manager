@@ -12,7 +12,7 @@ SCRIPT = ROOT / "Resources" / "Scripts" / "excel_sync.py"
 PYTHONPATH = ROOT / "Resources" / "python"
 
 sys.path.insert(0, str(PYTHONPATH))
-from openpyxl import Workbook  # noqa: E402
+from openpyxl import Workbook, load_workbook  # noqa: E402
 
 
 def run(command, workbook, payload):
@@ -38,10 +38,10 @@ def make_workbook(path):
     wb = Workbook()
     ws = wb.active
     ws.title = "Inventory"
-    ws.append(["Item Type", "Description", "Manufacturer", "Part Number", "Purchase Date", "Vendor", "Unit Cost", "Quantity", "Qty Received", "PO Number", "Budget Type", "Remaining Inventory", "Stockroom", "Notes"])
-    ws.append(["Laptop", "Example Laptop", "Example Manufacturer", "LAP-1", "2026-01-01", "Example Vendor", 1000, 5, 5, "PO-1", "Capital", 5, "Main", "Seed"])
+    ws.append(["Item Type", "Description", "Manufacturer", "Part Number", "Purchase Date", "Vendor", "Unit Cost", "Quantity", "Total Cost", "Qty Received", "PO Number", "Remaining Inventory", "Notes"])
+    ws.append(["Laptop", "Example Laptop", "Example Manufacturer", "LAP-1", "2026-01-01", "Example Vendor", 1000, 5, "=G2*H2", "5/5", "PO-1", 5, "Seed"])
     ws2 = wb.create_sheet("OpEx")
-    ws2.append(["Item Type", "Description", "Manufacturer", "Part Number", "Purchase Date", "Vendor", "Unit Cost", "Quantity", "Qty Received", "PO Number", "Budget Type", "Remaining Inventory", "Stockroom", "Notes"])
+    ws2.append(["Item Type", "Description", "Manufacturer", "Part Number", "Purchase Date", "Vendor", "Unit Cost", "Quantity", "Total Cost", "Qty Received", "PO Number", "Remaining Inventory", "Notes"])
     ws3 = wb.create_sheet("Items Deployed")
     ws3.append(["Item Type", "Description", "Manufacturer", "Part Number", "Qty Deployed", "Deployed To", "Deployed By", "Deployed Date", "Location", "Notes"])
     wb.save(path)
@@ -96,6 +96,9 @@ def main():
             "budgetType": "Capital",
             "remaining": 3
         }]})
+        remaining_value = load_workbook(workbook)["Inventory"].cell(row=2, column=12).value
+        if remaining_value != 3:
+            raise AssertionError(f"update-remaining left remaining inventory at {remaining_value!r}")
         inventory = run("read-inventory", workbook, {})
         deployed = run("read-deployed", workbook, {})
         if len(inventory.get("items", [])) < 2 or len(deployed.get("deployments", [])) < 1:

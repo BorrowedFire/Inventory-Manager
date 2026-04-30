@@ -553,7 +553,7 @@ def update_remaining(wb, data, filepath):
             if part_cell is None:
                 continue
             part_number = str(part_cell).strip().casefold()
-            po_number = str(ws.cell(row=row, column=9).value or "").strip().casefold()
+            po_number = str(ws.cell(row=row, column=11).value or "").strip().casefold()
             key = (sheet_name, part_number, po_number)
             fallback_key = (sheet_name, part_number)
             if key in lookup:
