@@ -32,7 +32,7 @@ The backup is made after a SQLite checkpoint so the saved file is self-contained
 
 ## App Management permission
 
-When Sparkle is ready to install an update, Inventory Manager shows a one-time notice explaining that macOS may request App Management permission. That permission is used only so the updater can replace Inventory Manager's own app bundle. It does not grant inventory database access, Excel workbook access, or permission to manage unrelated apps.
+When Sparkle is ready to install an update, Inventory Manager shows a notice explaining that macOS may request App Management permission. That permission is used only so the updater can replace Inventory Manager's own app bundle. It does not grant inventory database access, Excel workbook access, or permission to manage unrelated apps. Users can choose "Don't remind me again" if they do not want to see the explanation before future update installs.
 
 ## Release flow
 

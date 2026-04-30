@@ -5,7 +5,7 @@ import Sparkle
 @MainActor
 final class SparkleUpdateBackupCoordinator: NSObject, SPUUpdaterDelegate {
     private enum DefaultsKey {
-        static let appManagementNoticeAcknowledged = "updates.appManagementNoticeAcknowledged"
+        static let appManagementNoticeSuppressed = "updates.appManagementNoticeSuppressed"
     }
 
     private let model: AppModel
@@ -57,7 +57,7 @@ final class SparkleUpdateBackupCoordinator: NSObject, SPUUpdaterDelegate {
     }
 
     private func showAppManagementNoticeIfNeeded() -> Bool {
-        if defaults.bool(forKey: DefaultsKey.appManagementNoticeAcknowledged) {
+        if defaults.bool(forKey: DefaultsKey.appManagementNoticeSuppressed) {
             return true
         }
 
@@ -73,10 +73,12 @@ final class SparkleUpdateBackupCoordinator: NSObject, SPUUpdaterDelegate {
         """
         alert.addButton(withTitle: "Continue Update")
         alert.addButton(withTitle: "Not Now")
+        alert.showsSuppressionButton = true
+        alert.suppressionButton?.title = "Don't remind me again"
 
         let accepted = alert.runModal() == .alertFirstButtonReturn
-        if accepted {
-            defaults.set(true, forKey: DefaultsKey.appManagementNoticeAcknowledged)
+        if accepted, alert.suppressionButton?.state == .on {
+            defaults.set(true, forKey: DefaultsKey.appManagementNoticeSuppressed)
         }
         return accepted
     }
