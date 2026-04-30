@@ -49,7 +49,7 @@ codesign --force --deep --options runtime --timestamp --sign "$DEVELOPER_ID_APPL
 codesign --verify --deep --strict --verbose=4 "$APP_PATH"
 
 rm -f "$NOTARY_SUBMISSION_ZIP" "$DIST_DIR/$ZIP_NAME"
-ditto -c -k --keepParent "$APP_PATH" "$NOTARY_SUBMISSION_ZIP"
+COPYFILE_DISABLE=1 ditto -c -k --norsrc --noextattr --keepParent "$APP_PATH" "$NOTARY_SUBMISSION_ZIP"
 if [[ -n "${NOTARYTOOL_PROFILE:-}" ]]; then
   xcrun notarytool submit "$NOTARY_SUBMISSION_ZIP" --keychain-profile "$NOTARYTOOL_PROFILE" --wait
 else
@@ -59,7 +59,7 @@ xcrun stapler staple "$APP_PATH"
 xcrun stapler validate "$APP_PATH"
 spctl --assess --type execute --verbose=4 "$APP_PATH"
 
-ditto -c -k --keepParent "$APP_PATH" "$DIST_DIR/$ZIP_NAME"
+COPYFILE_DISABLE=1 ditto -c -k --norsrc --noextattr --keepParent "$APP_PATH" "$DIST_DIR/$ZIP_NAME"
 
 echo "Notarized app: $APP_PATH"
 echo "Notarized zip: $DIST_DIR/$ZIP_NAME"

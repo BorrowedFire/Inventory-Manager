@@ -9,12 +9,14 @@ struct SupportBundleDisclosureSheet: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Create Support Bundle")
-                        .font(.title2.bold())
+                        .font(.title2.weight(.semibold))
                     Text("Inventory Manager will create a zip file you can review before sending.")
                         .foregroundStyle(AppTheme.muted)
                 }
                 Spacer()
-                Button("Cancel", action: cancel)
+                Button(action: cancel) {
+                    Label("Cancel", systemImage: "xmark")
+                }
             }
 
             VStack(alignment: .leading, spacing: 12) {
@@ -26,20 +28,16 @@ struct SupportBundleDisclosureSheet: View {
 
             HStack {
                 Spacer()
-                Button("Create Bundle", action: createBundle)
+                Button(action: createBundle) {
+                    Label("Create Bundle", systemImage: "shippingbox.and.arrow.backward")
+                }
                     .buttonStyle(.borderedProminent)
                     .tint(AppTheme.blue)
             }
         }
         .padding(24)
         .frame(width: 620)
-        .background(
-            LinearGradient(
-                colors: [AppTheme.backgroundTop, AppTheme.backgroundBottom],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        )
+        .background(AppTheme.appBackground)
     }
 
     private func disclosureRow(systemImage: String, title: String, body: String) -> some View {

@@ -9,7 +9,7 @@ struct InstallGuideSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text("Install Inventory Manager")
-                .font(.system(size: 30, weight: .bold, design: .serif))
+                .font(.system(size: 30, weight: .semibold))
 
             Text("For the cleanest internal setup, move the app into the Applications folder before you start using it.")
                 .foregroundStyle(AppTheme.muted)
@@ -22,32 +22,32 @@ struct InstallGuideSheet: View {
             .frostedPanel()
 
             HStack {
-                Button("Move to Applications") {
+                Button {
                     moveToApplications()
+                } label: {
+                    Label("Move to Applications", systemImage: "arrow.down.app")
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(AppTheme.blue)
 
-                Button("Open Applications Folder") {
+                Button {
                     InstallHelper.openApplicationsFolder()
+                } label: {
+                    Label("Open Applications Folder", systemImage: "folder")
                 }
 
                 Spacer()
 
-                Button("Continue Here") {
+                Button {
                     continueHere()
+                } label: {
+                    Label("Continue Here", systemImage: "arrow.right")
                 }
             }
         }
         .padding(28)
         .frame(width: 760)
-        .background(
-            LinearGradient(
-                colors: [AppTheme.backgroundTop, AppTheme.backgroundBottom],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        )
+        .background(AppTheme.appBackground)
     }
 
     private func installBullet(_ text: String) -> some View {
