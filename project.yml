@@ -30,7 +30,6 @@ targets:
         CFBundlePackageType: APPL
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
-        SUEnableInstallerLauncherService: true
         SUFeedURL: https://github.com/BorrowedFire/Inventory-Manager/releases/latest/download/appcast.xml
         SUPublicEDKey: EKjDkvxFSb8UmWYUG8dRZvOyNLMxWDSF95rEH9C3htY=
     sources:
