@@ -3,9 +3,19 @@ import SwiftUI
 struct AppSettingsView: View {
     @ObservedObject var model: AppModel
     @State private var databaseToRestore: URL?
+    @AppStorage(AppAppearancePreference.storageKey) private var appearancePreference = AppAppearancePreference.dark.rawValue
 
     var body: some View {
         Form {
+            Section("Appearance") {
+                Picker("Theme", selection: $appearancePreference) {
+                    ForEach(AppAppearancePreference.allCases) { preference in
+                        Text(preference.title).tag(preference.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+
             Section("Workspace") {
                 TextField("App Name", text: $model.appDisplayName)
                 TextField("Organization", text: $model.organizationName)
@@ -112,8 +122,13 @@ struct AppSettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
         .padding(20)
+        .background(AppTheme.appBackground)
+        .tint(AppTheme.blue)
         .frame(minWidth: 620, minHeight: 460)
+        .preferredColorScheme((AppAppearancePreference(rawValue: appearancePreference) ?? .dark).colorScheme)
+        .onAppear(perform: sanitizeAppearancePreference)
         .confirmationDialog(
             "Restore database?",
             isPresented: Binding(
@@ -132,6 +147,12 @@ struct AppSettingsView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text(databaseToRestore.map { "Replace the current database with \($0.lastPathComponent). The current database will be backed up first." } ?? "")
+        }
+    }
+
+    private func sanitizeAppearancePreference() {
+        if AppAppearancePreference(rawValue: appearancePreference) == nil {
+            appearancePreference = AppAppearancePreference.dark.rawValue
         }
     }
 }

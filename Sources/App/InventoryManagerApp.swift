@@ -5,6 +5,7 @@ import Sparkle
 @main
 struct InventoryManagerApp: App {
     @StateObject private var model: AppModel
+    @AppStorage(AppAppearancePreference.storageKey) private var appearancePreference = AppAppearancePreference.dark.rawValue
     private let updateBackupCoordinator: SparkleUpdateBackupCoordinator
     private let updaterController: SPUStandardUpdaterController
 
@@ -24,9 +25,10 @@ struct InventoryManagerApp: App {
     var body: some Scene {
         WindowGroup {
             MainView(model: model)
-                .frame(minWidth: 1180, minHeight: 760)
+                .frame(minWidth: 1080, minHeight: 720)
+                .preferredColorScheme((AppAppearancePreference(rawValue: appearancePreference) ?? .dark).colorScheme)
         }
-        .defaultSize(width: 1280, height: 820)
+        .defaultSize(width: 1440, height: 900)
         .windowResizability(.contentSize)
         .commands {
             CommandGroup(after: .newItem) {

@@ -1,28 +1,83 @@
 import SwiftUI
 import AppKit
 
+enum AppAppearancePreference: String, CaseIterable, Identifiable {
+    static let storageKey = "appearance.preference"
+
+    case dark
+    case light
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .dark: "Dark"
+        case .light: "Light"
+        }
+    }
+
+    var colorScheme: ColorScheme {
+        switch self {
+        case .dark: .dark
+        case .light: .light
+        }
+    }
+}
+
 enum AppTheme {
-    static let backgroundTop = Color(red: 0.95, green: 0.93, blue: 0.89)
-    static let backgroundBottom = Color(red: 0.86, green: 0.90, blue: 0.95)
-    static let panel = Color.white.opacity(0.84)
-    static let stroke = Color.black.opacity(0.08)
-    static let text = Color(red: 0.11, green: 0.14, blue: 0.19)
-    static let muted = Color(red: 0.35, green: 0.41, blue: 0.47)
-    static let gold = Color(red: 0.78, green: 0.56, blue: 0.16)
-    static let blue = Color(red: 0.17, green: 0.36, blue: 0.73)
-    static let rose = Color(red: 0.73, green: 0.29, blue: 0.31)
-    static let teal = Color(red: 0.16, green: 0.54, blue: 0.52)
+    static let panelRadius: CGFloat = 14
+    static let cardRadius: CGFloat = 12
+    static let controlRadius: CGFloat = 8
+
+    static let backgroundTop = adaptive(light: rgb(246, 247, 249), dark: rgb(6, 7, 9))
+    static let backgroundBottom = adaptive(light: rgb(229, 233, 238), dark: rgb(14, 15, 18))
+    static let sidebar = adaptive(light: rgb(238, 241, 245), dark: rgb(9, 10, 12))
+    static let panel = adaptive(light: rgb(255, 255, 255, alpha: 0.88), dark: rgb(24, 25, 28, alpha: 0.90))
+    static let panelElevated = adaptive(light: rgb(255, 255, 255, alpha: 0.96), dark: rgb(31, 32, 36, alpha: 0.96))
+    static let controlBackground = adaptive(light: rgb(244, 246, 249), dark: rgb(37, 38, 42))
+    static let row = adaptive(light: rgb(248, 249, 251), dark: rgb(31, 32, 36))
+    static let rowSelected = adaptive(light: rgb(232, 240, 255), dark: rgb(41, 43, 49))
+    static let sidebarSelection = adaptive(light: rgb(224, 234, 252), dark: rgb(38, 40, 46))
+    static let stroke = adaptive(light: rgb(25, 28, 34, alpha: 0.10), dark: rgb(255, 255, 255, alpha: 0.10))
+    static let hairline = adaptive(light: rgb(25, 28, 34, alpha: 0.07), dark: rgb(255, 255, 255, alpha: 0.07))
+    static let text = adaptive(light: rgb(18, 22, 28), dark: rgb(244, 246, 248))
+    static let muted = adaptive(light: rgb(83, 91, 102), dark: rgb(165, 171, 181))
+    static let secondaryText = adaptive(light: rgb(111, 119, 131), dark: rgb(126, 132, 143))
+    static let gold = adaptive(light: rgb(161, 111, 0), dark: rgb(255, 202, 76))
+    static let blue = adaptive(light: rgb(0, 102, 204), dark: rgb(88, 166, 255))
+    static let rose = adaptive(light: rgb(190, 52, 67), dark: rgb(255, 99, 111))
+    static let teal = adaptive(light: rgb(0, 128, 117), dark: rgb(82, 216, 196))
+    static let green = adaptive(light: rgb(36, 138, 61), dark: rgb(94, 205, 117))
+
+    static var appBackground: some ShapeStyle {
+        LinearGradient(
+            colors: [backgroundTop, backgroundBottom],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
+    private static func adaptive(light: NSColor, dark: NSColor) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            appearance.isDarkAppearance ? dark : light
+        })
+    }
+
+    private static func rgb(_ red: CGFloat, _ green: CGFloat, _ blue: CGFloat, alpha: CGFloat = 1) -> NSColor {
+        NSColor(srgbRed: red / 255, green: green / 255, blue: blue / 255, alpha: alpha)
+    }
 }
 
 struct FrostedPanel: ViewModifier {
     func body(content: Content) -> some View {
         content
-            .padding(18)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .padding(16)
+            .background(AppTheme.panel, in: RoundedRectangle(cornerRadius: AppTheme.panelRadius, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                RoundedRectangle(cornerRadius: AppTheme.panelRadius, style: .continuous)
                     .stroke(AppTheme.stroke, lineWidth: 1)
             )
+            .shadow(color: Color.black.opacity(0.12), radius: 18, x: 0, y: 10)
     }
 }
 
@@ -36,44 +91,66 @@ struct StatCardView: View {
     let stat: DashboardStat
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(stat.title.uppercased())
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
-                .foregroundStyle(AppTheme.muted)
-                .tracking(1.4)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center, spacing: 10) {
+                Image(systemName: symbol)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(accentColor)
+                    .frame(width: 30, height: 30)
+                    .background(accentColor.opacity(0.14), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
 
-            Text(stat.value)
-                .font(.system(size: 28, weight: .bold, design: .rounded))
-                .foregroundStyle(AppTheme.text)
+                Text(stat.title.uppercased())
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(AppTheme.secondaryText)
+                    .tracking(1.1)
+                    .lineLimit(2)
+            }
 
-            Text(stat.note)
-                .font(.system(size: 13, weight: .medium, design: .default))
-                .foregroundStyle(AppTheme.muted)
-                .lineLimit(2)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(stat.value)
+                    .font(.system(size: 28, weight: .semibold, design: .rounded))
+                    .foregroundStyle(AppTheme.text)
+                    .monospacedDigit()
+
+                Text(stat.note)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(AppTheme.muted)
+                    .lineLimit(2)
+            }
+
+            Capsule()
+                .fill(accentColor.opacity(0.75))
+                .frame(width: 36, height: 3)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(18)
-        .background(accentGradient, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .padding(16)
+        .background(AppTheme.panelElevated, in: RoundedRectangle(cornerRadius: AppTheme.cardRadius, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(Color.white.opacity(0.45), lineWidth: 1)
+            RoundedRectangle(cornerRadius: AppTheme.cardRadius, style: .continuous)
+                .stroke(AppTheme.stroke, lineWidth: 1)
         )
     }
 
-    private var accentGradient: LinearGradient {
+    private var accentColor: Color {
         switch stat.accent {
-        case "amber":
-            LinearGradient(colors: [Color(red: 0.98, green: 0.90, blue: 0.72), Color.white.opacity(0.72)], startPoint: .topLeading, endPoint: .bottomTrailing)
-        case "blue":
-            LinearGradient(colors: [Color(red: 0.82, green: 0.89, blue: 0.98), Color.white.opacity(0.72)], startPoint: .topLeading, endPoint: .bottomTrailing)
-        case "teal":
-            LinearGradient(colors: [Color(red: 0.80, green: 0.94, blue: 0.92), Color.white.opacity(0.72)], startPoint: .topLeading, endPoint: .bottomTrailing)
-        case "rose":
-            LinearGradient(colors: [Color(red: 0.98, green: 0.84, blue: 0.84), Color.white.opacity(0.72)], startPoint: .topLeading, endPoint: .bottomTrailing)
-        case "indigo":
-            LinearGradient(colors: [Color(red: 0.87, green: 0.86, blue: 0.98), Color.white.opacity(0.72)], startPoint: .topLeading, endPoint: .bottomTrailing)
-        default:
-            LinearGradient(colors: [Color(red: 0.85, green: 0.97, blue: 0.92), Color.white.opacity(0.72)], startPoint: .topLeading, endPoint: .bottomTrailing)
+        case "amber": AppTheme.gold
+        case "blue", "indigo": AppTheme.blue
+        case "teal": AppTheme.teal
+        case "rose": AppTheme.rose
+        default: AppTheme.green
+        }
+    }
+
+    private var symbol: String {
+        switch stat.title {
+        case "Cataloged Items": "shippingbox.fill"
+        case "Budget Overview": "chart.bar.doc.horizontal.fill"
+        case "Inventory Value": "dollarsign.circle.fill"
+        case "Total Deployed": "arrowshape.turn.up.right.fill"
+        case "Low Stock Alerts": "exclamationmark.triangle.fill"
+        case "Stockrooms": "building.2.fill"
+        case "Database": "externaldrive.fill"
+        default: "gauge.with.dots.needle.50percent"
         }
     }
 }
@@ -82,37 +159,60 @@ struct SectionShell<Content: View>: View {
     let title: String
     let eyebrow: String
     let subtitle: String?
+    let systemImage: String?
     @ViewBuilder let content: Content
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(eyebrow.uppercased())
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
-                        .foregroundStyle(AppTheme.blue)
-                        .tracking(1.6)
-                    Text(title)
-                        .font(.system(size: 34, weight: .bold, design: .serif))
-                        .foregroundStyle(AppTheme.text)
-                    if let subtitle, !subtitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Text(subtitle)
-                            .font(.system(size: 15, weight: .medium, design: .default))
-                            .foregroundStyle(AppTheme.muted)
-                    }
-                }
+                header
 
                 content
             }
             .padding(28)
         }
-        .background(
-            LinearGradient(
-                colors: [AppTheme.backgroundTop, AppTheme.backgroundBottom],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        )
+        .scrollContentBackground(.hidden)
+        .background(AppTheme.appBackground)
+    }
+
+    private var header: some View {
+        HStack(alignment: .center, spacing: 14) {
+            if let systemImage {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .fill(AppTheme.blue.opacity(0.13))
+                    Image(systemName: systemImage)
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(AppTheme.blue)
+                }
+                .frame(width: 42, height: 42)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .stroke(AppTheme.blue.opacity(0.18), lineWidth: 1)
+                )
+            }
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(eyebrow.uppercased())
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundStyle(AppTheme.blue)
+                    .tracking(1.7)
+
+                Text(title)
+                    .font(.system(size: 31, weight: .semibold))
+                    .foregroundStyle(AppTheme.text)
+                    .lineLimit(2)
+
+                if let subtitle, !subtitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text(subtitle)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(AppTheme.muted)
+                        .lineLimit(2)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.bottom, 2)
     }
 }
 
@@ -122,8 +222,8 @@ struct ItemTypeIconView: View {
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.white.opacity(0.84))
+            RoundedRectangle(cornerRadius: AppTheme.controlRadius, style: .continuous)
+                .fill(tintColor.opacity(0.13))
             Image(systemName: ItemTypeIconCatalog.symbol(for: itemType))
                 .symbolRenderingMode(.monochrome)
                 .font(.system(size: size, weight: .semibold))
@@ -131,7 +231,7 @@ struct ItemTypeIconView: View {
         }
         .frame(width: size + 18, height: size + 18)
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: AppTheme.controlRadius, style: .continuous)
                 .stroke(tintColor.opacity(0.18), lineWidth: 1)
         )
         .accessibilityLabel("\(itemType) icon")
@@ -143,6 +243,15 @@ struct ItemTypeIconView: View {
 
     private var backgroundColor: Color {
         tintColor.opacity(0.10)
+    }
+}
+
+private extension NSAppearance {
+    var isDarkAppearance: Bool {
+        let darkAppearances: [NSAppearance.Name] = [.darkAqua, .vibrantDark, .accessibilityHighContrastDarkAqua, .accessibilityHighContrastVibrantDark]
+        return bestMatch(from: darkAppearances + [.aqua, .vibrantLight, .accessibilityHighContrastAqua, .accessibilityHighContrastVibrantLight]).map {
+            darkAppearances.contains($0)
+        } ?? false
     }
 }
 

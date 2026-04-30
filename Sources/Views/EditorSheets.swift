@@ -35,8 +35,10 @@ struct InventoryEditSheet: View {
                 if draft.availableQuantity > 0 {
                     ItemTypeIconView(itemType: draft.itemType, size: 18)
                 }
-                Button("Close") {
+                Button {
                     dismiss()
+                } label: {
+                    Label("Close", systemImage: "xmark")
                 }
             }
 
@@ -47,6 +49,7 @@ struct InventoryEditSheet: View {
         }
         .padding(24)
         .frame(width: 520)
+        .background(AppTheme.appBackground)
     }
 }
 
@@ -118,9 +121,15 @@ struct InventoryEditor: View {
             TextEditor(text: $item.notes)
                 .frame(height: 120)
                 .padding(8)
-                .background(Color.white.opacity(0.55), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .background(AppTheme.controlBackground, in: RoundedRectangle(cornerRadius: AppTheme.controlRadius, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: AppTheme.controlRadius, style: .continuous)
+                        .stroke(AppTheme.stroke, lineWidth: 1)
+                )
 
-            Button(item.id == 0 ? "Create Item" : "Save Changes", action: onSave)
+            Button(action: onSave) {
+                Label(item.id == 0 ? "Create Item" : "Save Changes", systemImage: item.id == 0 ? "plus" : "checkmark.circle")
+            }
                 .buttonStyle(.borderedProminent)
                 .tint(AppTheme.blue)
                 .disabled(item.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -160,8 +169,10 @@ struct DeploySheet: View {
                         .foregroundStyle(AppTheme.muted)
                 }
                 Spacer()
-                Button("Close") {
+                Button {
                     dismiss()
+                } label: {
+                    Label("Close", systemImage: "xmark")
                 }
             }
 
@@ -176,22 +187,30 @@ struct DeploySheet: View {
             TextEditor(text: $notes)
                 .frame(height: 100)
                 .padding(8)
-                .background(Color.white.opacity(0.55), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .background(AppTheme.controlBackground, in: RoundedRectangle(cornerRadius: AppTheme.controlRadius, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: AppTheme.controlRadius, style: .continuous)
+                        .stroke(AppTheme.stroke, lineWidth: 1)
+                )
 
             HStack {
                 Button("Cancel", role: .cancel) {
                     dismiss()
                 }
                 Spacer()
-                Button("Deploy") {
+                Button {
                     onDeploy(qty, deployedTo, deployedBy.isEmpty ? currentUser : deployedBy, deployedDate, location, notes)
+                } label: {
+                    Label("Deploy", systemImage: "arrowshape.turn.up.right")
                 }
                 .buttonStyle(.borderedProminent)
+                .tint(AppTheme.teal)
                 .disabled(deployedTo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(24)
         .frame(width: 420)
+        .background(AppTheme.appBackground)
         .onAppear {
             deployedBy = currentUser
         }
@@ -222,7 +241,9 @@ struct ParsedImportEditor: View {
                     .foregroundStyle(AppTheme.muted)
                     .lineLimit(1)
                 Spacer()
-                Button("Remove Row", role: .destructive, action: onRemove)
+                Button(role: .destructive, action: onRemove) {
+                    Label("Remove Row", systemImage: "trash")
+                }
                 Picker("Budget", selection: $item.budgetType) {
                     Text("Capital").tag("Capital")
                     Text("OpEx").tag("OpEx")
@@ -280,7 +301,11 @@ struct ParsedImportEditor: View {
             TextEditor(text: $item.notes)
                 .frame(height: 76)
                 .padding(8)
-                .background(Color.white.opacity(0.55), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .background(AppTheme.controlBackground, in: RoundedRectangle(cornerRadius: AppTheme.controlRadius, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: AppTheme.controlRadius, style: .continuous)
+                        .stroke(AppTheme.stroke, lineWidth: 1)
+                )
         }
         .frostedPanel()
     }
@@ -311,8 +336,10 @@ struct StockroomEditorSheet: View {
                 Text(draft.id == nil ? "New Stockroom" : "Edit Stockroom")
                     .font(.title2.bold())
                 Spacer()
-                Button("Close") {
+                Button {
                     dismiss()
+                } label: {
+                    Label("Close", systemImage: "xmark")
                 }
             }
 
@@ -325,15 +352,19 @@ struct StockroomEditorSheet: View {
                     dismiss()
                 }
                 Spacer()
-                Button(draft.id == nil ? "Create" : "Save") {
+                Button {
                     onSave(draft)
+                } label: {
+                    Label(draft.id == nil ? "Create" : "Save", systemImage: draft.id == nil ? "plus" : "checkmark.circle")
                 }
                 .buttonStyle(.borderedProminent)
+                .tint(AppTheme.blue)
                 .disabled(draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(24)
         .frame(width: 420)
+        .background(AppTheme.appBackground)
     }
 
     private func field(_ label: String, text: Binding<String>) -> some View {

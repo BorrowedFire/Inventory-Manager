@@ -40,6 +40,10 @@ struct ImportPreviewPanel: View {
             }
         }
         .padding(12)
-        .background(AppTheme.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(AppTheme.panelElevated, in: RoundedRectangle(cornerRadius: AppTheme.panelRadius, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.panelRadius, style: .continuous)
+                .stroke(AppTheme.stroke, lineWidth: 1)
+        )
     }
 }

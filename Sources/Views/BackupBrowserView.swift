@@ -40,7 +40,11 @@ struct BackupBrowserView: View {
                         Button("Restore") { backupToRestore = backup }
                     }
                     .padding(10)
-                    .background(Color.white.opacity(0.55), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .background(AppTheme.row, in: RoundedRectangle(cornerRadius: AppTheme.cardRadius, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: AppTheme.cardRadius, style: .continuous)
+                            .stroke(AppTheme.hairline, lineWidth: 1)
+                    )
                 }
             }
         }

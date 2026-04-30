@@ -10,7 +10,7 @@ struct OnboardingSheet: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Welcome to \(model.appDisplayName)")
-                        .font(.system(size: 30, weight: .bold, design: .serif))
+                        .font(.system(size: 30, weight: .semibold))
                         .foregroundStyle(AppTheme.text)
                     Text("Use this setup guide to confirm the workspace name, database, stockrooms, and spreadsheet behavior before the team starts working in the app.")
                         .foregroundStyle(AppTheme.muted)
@@ -59,16 +59,20 @@ struct OnboardingSheet: View {
             }
 
             HStack {
-                Button("Open Settings") {
+                Button {
                     model.selectedSection = .settings
                     close()
+                } label: {
+                    Label("Open Settings", systemImage: "gearshape")
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(AppTheme.blue)
 
-                Button("Create First Stockroom") {
+                Button {
                     model.selectedSection = .stockrooms
                     createStockroom()
+                } label: {
+                    Label("Create First Stockroom", systemImage: "plus")
                 }
                 .buttonStyle(.bordered)
 
@@ -81,13 +85,7 @@ struct OnboardingSheet: View {
         }
         .padding(28)
         .frame(width: 760)
-        .background(
-            LinearGradient(
-                colors: [AppTheme.backgroundTop, AppTheme.backgroundBottom],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        )
+        .background(AppTheme.appBackground)
     }
 
     private func onboardingCallout(title: String, body: String) -> some View {
@@ -100,6 +98,10 @@ struct OnboardingSheet: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
-        .background(Color.white.opacity(0.45), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .background(AppTheme.row, in: RoundedRectangle(cornerRadius: AppTheme.cardRadius, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.cardRadius, style: .continuous)
+                .stroke(AppTheme.hairline, lineWidth: 1)
+        )
     }
 }
