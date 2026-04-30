@@ -30,6 +30,10 @@ Backups/Before Updates/InventoryData-pre-update-v<version>-b<build>-<timestamp>.
 
 The backup is made after a SQLite checkpoint so the saved file is self-contained. If the backup fails, the update is paused instead of continuing without a safety copy.
 
+## App Management permission
+
+When Sparkle is ready to install an update, Inventory Manager shows a one-time notice explaining that macOS may request App Management permission. That permission is used only so the updater can replace Inventory Manager's own app bundle. It does not grant inventory database access, Excel workbook access, or permission to manage unrelated apps.
+
 ## Release flow
 
 1. Build, Developer ID sign, and notarize the app.
