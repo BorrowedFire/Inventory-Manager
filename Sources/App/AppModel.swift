@@ -52,7 +52,13 @@ final class AppModel: ObservableObject {
     @Published var stockrooms: [StockroomRecord] = []
     @Published var currentUser = AppUserRecord(id: nil, username: NSUserName(), role: "viewer", displayName: NSUserName())
     @Published var isLoading = false
-    @Published var errorMessage: String?
+    @Published var errorMessage: String? {
+        didSet {
+            if let errorMessage, errorMessage != oldValue {
+                recordErrorMessage(errorMessage)
+            }
+        }
+    }
     @Published var appDisplayName: String
     @Published var organizationName: String
     @Published var databaseURL: URL
@@ -91,6 +97,7 @@ final class AppModel: ObservableObject {
     private let pdfImportService = PDFImportService()
     private let lockRetryNanoseconds: UInt64 = 300_000_000
     private let defaults = UserDefaults.standard
+    private var recentErrorMessages: [String] = []
 
     init() {
         let databaseURL = Self.initialDatabaseURL()
@@ -364,6 +371,9 @@ final class AppModel: ObservableObject {
     }
 
     func deleteInventoryItem(id: Int64) async {
+        var excelRollbackURL: URL?
+        var excelWorkbookMutated = false
+
         do {
             let databaseService = self.databaseService
             let item = try await retryingDatabaseCall {
@@ -376,7 +386,9 @@ final class AppModel: ObservableObject {
                 guard let item else {
                     throw DatabaseError.stepFailed("Could not find the inventory item to remove from Excel.")
                 }
+                excelRollbackURL = try createExcelWorkbookRollbackBackup()
                 try excelSyncService.deleteInventory(item, linkedDeployments: linkedDeployments, from: excelInventoryPath)
+                excelWorkbookMutated = true
             }
             try await retryingDatabaseCall { try databaseService.deleteInventoryItem(id: id) }
             if selectedInventoryID == id {
@@ -384,8 +396,40 @@ final class AppModel: ObservableObject {
             }
             try await syncRemainingInventoryIfNeeded()
             persistExcelSyncMarker()
+            removeExcelWorkbookRollbackBackup(excelRollbackURL)
             await load()
         } catch {
+            errorMessage = await restoreExcelWorkbookIfNeeded(
+                from: excelRollbackURL,
+                workbookWasMutated: excelWorkbookMutated,
+                originalError: error
+            )
+        }
+    }
+
+    func createSupportBundle() async {
+        let context = SupportBundleService.makeContext(
+            databaseURL: databaseURL,
+            excelInventoryPath: excelInventoryPath,
+            currentUserRole: currentUser.role,
+            inventoryCount: inventory.count,
+            deploymentCount: deployments.count,
+            stockroomCount: stockrooms.count,
+            backupCount: backupRecords.count,
+            lastVisibleError: errorMessage,
+            lastImportSummary: lastImportSummary,
+            recentErrors: recentErrorMessages
+        )
+
+        do {
+            let bundleURL = try await Task.detached(priority: .userInitiated) {
+                try SupportBundleService.createSupportBundle(context: context)
+            }.value
+            AppLog.support.info("Created support bundle")
+            lastImportSummary = "Support bundle created: \(bundleURL.lastPathComponent)."
+            FileDialogs.revealInFinder(bundleURL)
+        } catch {
+            AppLog.support.error("Support bundle creation failed: \(error.localizedDescription, privacy: .public)")
             errorMessage = error.localizedDescription
         }
     }
@@ -402,6 +446,9 @@ final class AppModel: ObservableObject {
     }
 
     func deleteDeployment(id: Int64) async {
+        var excelRollbackURL: URL?
+        var excelWorkbookMutated = false
+
         do {
             let databaseService = self.databaseService
             let deployment = try await retryingDatabaseCall {
@@ -411,14 +458,21 @@ final class AppModel: ObservableObject {
                 guard let deployment else {
                     throw DatabaseError.stepFailed("Could not find the deployment row to remove from Excel.")
                 }
+                excelRollbackURL = try createExcelWorkbookRollbackBackup()
                 try excelSyncService.deleteDeployments([deployment], from: excelInventoryPath)
+                excelWorkbookMutated = true
             }
             try await retryingDatabaseCall { try databaseService.deleteDeployment(id: id) }
             try await syncRemainingInventoryIfNeeded()
             persistExcelSyncMarker()
+            removeExcelWorkbookRollbackBackup(excelRollbackURL)
             await load()
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = await restoreExcelWorkbookIfNeeded(
+                from: excelRollbackURL,
+                workbookWasMutated: excelWorkbookMutated,
+                originalError: error
+            )
         }
     }
 
@@ -649,6 +703,69 @@ final class AppModel: ObservableObject {
         lastImportUndoBackupURL = url
         defaults.set(url.path, forKey: DefaultsKey.lastImportUndoBackupPath)
         refreshBackupRecords()
+    }
+
+    private func recordErrorMessage(_ message: String) {
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        recentErrorMessages.append("[\(timestamp)] \(message)")
+        if recentErrorMessages.count > 25 {
+            recentErrorMessages.removeFirst(recentErrorMessages.count - 25)
+        }
+        AppLog.app.error("User-facing error: \(message, privacy: .private)")
+    }
+
+    private func createExcelWorkbookRollbackBackup() throws -> URL {
+        let sourceURL = URL(fileURLWithPath: excelInventoryPath)
+        let fileManager = FileManager.default
+        let rollbackDirectory = fileManager.temporaryDirectory
+            .appendingPathComponent("InventoryManagerExcelRollback", isDirectory: true)
+        try fileManager.createDirectory(at: rollbackDirectory, withIntermediateDirectories: true)
+
+        let rollbackURL = rollbackDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension(sourceURL.pathExtension.isEmpty ? "xlsx" : sourceURL.pathExtension)
+
+        try fileManager.copyItem(at: sourceURL, to: rollbackURL)
+        AppLog.excelSync.info("Created Excel rollback backup")
+        return rollbackURL
+    }
+
+    private func removeExcelWorkbookRollbackBackup(_ rollbackURL: URL?) {
+        guard let rollbackURL else { return }
+        try? FileManager.default.removeItem(at: rollbackURL)
+    }
+
+    private func restoreExcelWorkbookIfNeeded(from rollbackURL: URL?, workbookWasMutated: Bool, originalError: Error) async -> String {
+        guard workbookWasMutated, let rollbackURL else {
+            removeExcelWorkbookRollbackBackup(rollbackURL)
+            return originalError.localizedDescription
+        }
+
+        do {
+            try restoreExcelWorkbook(from: rollbackURL)
+            removeExcelWorkbookRollbackBackup(rollbackURL)
+            AppLog.excelSync.error("Restored Excel workbook after failed destructive sync: \(originalError.localizedDescription, privacy: .public)")
+            return "\(originalError.localizedDescription) The Excel workbook was restored to its previous state."
+        } catch {
+            removeExcelWorkbookRollbackBackup(rollbackURL)
+            AppLog.excelSync.error("Failed to restore Excel workbook after destructive sync failure: \(error.localizedDescription, privacy: .public)")
+            return "\(originalError.localizedDescription) Excel rollback also failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func restoreExcelWorkbook(from rollbackURL: URL) throws {
+        let fileManager = FileManager.default
+        let destinationURL = URL(fileURLWithPath: excelInventoryPath)
+        let restoreCandidateURL = destinationURL
+            .deletingLastPathComponent()
+            .appendingPathComponent(".\(destinationURL.lastPathComponent).restore-\(UUID().uuidString)")
+
+        try fileManager.copyItem(at: rollbackURL, to: restoreCandidateURL)
+        if fileManager.fileExists(atPath: destinationURL.path) {
+            _ = try fileManager.replaceItemAt(destinationURL, withItemAt: restoreCandidateURL)
+        } else {
+            try fileManager.moveItem(at: restoreCandidateURL, to: destinationURL)
+        }
     }
 
     @discardableResult

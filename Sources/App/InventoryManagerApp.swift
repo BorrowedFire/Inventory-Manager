@@ -90,6 +90,10 @@ struct InventoryManagerApp: App {
                 Button("Check for Updates…") {
                     updaterController.checkForUpdates(nil)
                 }
+
+                Button("Report Problem…") {
+                    Task { await model.createSupportBundle() }
+                }
             }
 
             CommandMenu("Inventory") {
