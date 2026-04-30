@@ -84,6 +84,33 @@ struct Runner {
         }
         print("blockQuantityBelowActiveDeployments=\(reductionBlocked ? "ok" : "fail")")
 
+        let overDeployImportBlocked: Bool
+        do {
+            _ = try service.importFromExcel(
+                inventoryItems: [
+                    ImportedInventoryItem(
+                        itemType: firstItem.itemType,
+                        description: firstItem.description,
+                        manufacturer: firstItem.manufacturer,
+                        partNumber: firstItem.partNumber,
+                        purchaseDate: firstItem.purchaseDate,
+                        vendor: firstItem.vendor,
+                        unitCost: firstItem.unitCost,
+                        quantity: 0,
+                        qtyReceived: 0,
+                        poNumber: firstItem.poNumber,
+                        notes: firstItem.notes,
+                        budgetType: firstItem.budgetType
+                    )
+                ],
+                deployments: []
+            )
+            overDeployImportBlocked = false
+        } catch {
+            overDeployImportBlocked = true
+        }
+        print("blockExcelImportBelowActiveDeployments=\(overDeployImportBlocked ? "ok" : "fail")")
+
         var deploymentToDelete: DeploymentRecord?
         if let newDeployment {
             try service.deploy(draft)
@@ -138,6 +165,70 @@ struct Runner {
             let deletedItem = try service.inventoryItems().first(where: { $0.id == parsedItem.id })
             print("deleteInventoryItem=\(deletedItem == nil ? "ok" : "fail")")
         }
+
+        let duplicatePart = "DUP-SMOKE-\(smokeSuffix)"
+        let retainedID = try service.createInventoryItem(
+            InventoryItemRecord(
+                id: 0,
+                itemType: "Accessory",
+                description: "Duplicate Retained",
+                manufacturer: "SmokeCo",
+                partNumber: duplicatePart,
+                purchaseDate: "04/06/2026",
+                vendor: "SmokeVendor",
+                unitCost: 50,
+                quantity: 2,
+                qtyReceived: 2,
+                poNumber: "",
+                notes: "retained duplicate",
+                budgetType: "Capital",
+                stockroomId: nil,
+                stockroomName: "Unassigned",
+                availableQuantity: 2,
+                updatedAt: ""
+            )
+        )
+        let duplicateID = try service.createInventoryItem(
+            InventoryItemRecord(
+                id: 0,
+                itemType: "Accessory",
+                description: "Duplicate Removed",
+                manufacturer: "SmokeCo",
+                partNumber: duplicatePart,
+                purchaseDate: "04/06/2026",
+                vendor: "SmokeVendor",
+                unitCost: 50,
+                quantity: 2,
+                qtyReceived: 2,
+                poNumber: "",
+                notes: "removed duplicate",
+                budgetType: "Capital",
+                stockroomId: nil,
+                stockroomName: "Unassigned",
+                availableQuantity: 2,
+                updatedAt: ""
+            )
+        )
+        try service.deploy(
+            DeploymentDraft(
+                inventoryItemId: duplicateID,
+                itemType: "Accessory",
+                description: "Duplicate Removed",
+                manufacturer: "SmokeCo",
+                partNumber: duplicatePart,
+                stockroomId: nil,
+                qtyDeployed: 1,
+                deployedTo: "Duplicate Smoke User",
+                deployedBy: user.displayName,
+                deployedDate: "04/06/2026",
+                deployedLocation: "Office",
+                notes: "duplicate cleanup smoke"
+            )
+        )
+        let duplicateRemovedCount = try service.removeDuplicateInventoryItems()
+        let movedDeployment = try service.deployments().first(where: { $0.deployedTo == "Duplicate Smoke User" })
+        let duplicateStillExists = try service.inventoryItems().contains(where: { $0.id == duplicateID })
+        print("removeDuplicates.migratesDeployments=\(duplicateRemovedCount == 1 && movedDeployment?.inventoryItemId == retainedID && !duplicateStillExists ? "ok" : "fail")")
 
         try service.saveAnnualBudgets([
             AnnualBudgetRecord(year: "2026", budgetType: "Capital", allocatedBudget: "1000", fundCode: "FUND", glCode: "GL")

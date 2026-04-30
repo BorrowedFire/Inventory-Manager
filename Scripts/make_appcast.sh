@@ -2,12 +2,27 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
 DIST_DIR="$ROOT/dist"
 ZIP_PATH="${1:-$DIST_DIR/InventoryManager-macOS.zip}"
 APPCAST_PATH="${2:-$DIST_DIR/appcast.xml}"
 DOWNLOAD_URL="${DOWNLOAD_URL:-https://github.com/BorrowedFire/Inventory-Manager/releases/latest/download/InventoryManager-macOS.zip}"
-VERSION="${VERSION:-0.1.0}"
-BUILD="${BUILD:-1}"
+PROJECT_VERSION_INFO=$(python3 - <<'PY'
+from pathlib import Path
+import re
+project = Path("project.yml").read_text()
+version = re.search(r"MARKETING_VERSION:\s*(\S+)", project)
+build = re.search(r"CURRENT_PROJECT_VERSION:\s*(\S+)", project)
+if not version or not build:
+    raise SystemExit("error: could not read MARKETING_VERSION/CURRENT_PROJECT_VERSION from project.yml")
+print(version.group(1))
+print(build.group(1))
+PY
+)
+PROJECT_VERSION=$(printf "%s\n" "$PROJECT_VERSION_INFO" | sed -n '1p')
+PROJECT_BUILD=$(printf "%s\n" "$PROJECT_VERSION_INFO" | sed -n '2p')
+VERSION="${VERSION:-$PROJECT_VERSION}"
+BUILD="${BUILD:-$PROJECT_BUILD}"
 PUB_DATE="${PUB_DATE:-$(LC_ALL=C date -u '+%a, %d %b %Y %H:%M:%S %z')}"
 
 if [[ ! -f "$ZIP_PATH" ]]; then

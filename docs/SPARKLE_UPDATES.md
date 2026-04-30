@@ -45,6 +45,7 @@ Scripts/make_appcast.sh dist/InventoryManager-macOS.zip dist/appcast.xml
 ```
 
 The script signs the zip using Sparkle's `sign_update` tool and the Keychain account above.
+When `VERSION` and `BUILD` are not provided, it reads `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` from `project.yml`.
 
 4. Upload both files to the GitHub Release:
 

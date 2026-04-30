@@ -34,7 +34,7 @@ struct AppSettingsView: View {
                         }
                     }
                     Button("Backup…") {
-                        if let url = FileDialogs.chooseDatabaseSaveURL(defaultName: "InventoryData Backup.sqlite") {
+                        if let url = FileDialogs.chooseDatabaseSaveURL(defaultName: "InventoryData-manual-backup.sqlite") {
                             Task { await model.backupDatabase(to: url) }
                         }
                     }

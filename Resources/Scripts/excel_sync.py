@@ -231,6 +231,17 @@ def normalized_quantity(value):
     return "" if parsed is None else str(parsed)
 
 
+def normalized_money(value):
+    parsed = parse_float(value, default=None)
+    return "" if parsed is None else f"{parsed:.2f}"
+
+
+def normalized_qty_received(value):
+    if isinstance(value, str) and "/" in value:
+        value = value.split("/", 1)[0]
+    return normalized_quantity(value)
+
+
 def sheet_for_budget(budget_type):
     return "OpEx" if normalized_text(budget_type) == "opex" else "Inventory"
 
@@ -245,19 +256,32 @@ def inventory_match_score(ws, row, item):
         (4, normalized_text(item.get("partNumber", ""))),
         (5, normalized_date(item.get("purchaseDate", ""))),
         (6, normalized_text(item.get("vendor", ""))),
+        (7, normalized_money(item.get("unitCost", ""))),
+        (8, normalized_quantity(item.get("quantity", ""))),
+        (10, normalized_qty_received(item.get("qtyReceived", ""))),
         (11, normalized_text(item.get("poNumber", ""))),
+        (13, normalized_text(item.get("notes", ""))),
     ]
 
     for column, expected in checks:
         actual_value = ws.cell(row=row, column=column).value
-        actual = normalized_date(actual_value) if column == 5 else normalized_text(actual_value)
+        if column == 5:
+            actual = normalized_date(actual_value)
+        elif column == 7:
+            actual = normalized_money(actual_value)
+        elif column == 8:
+            actual = normalized_quantity(actual_value)
+        elif column == 10:
+            actual = normalized_qty_received(actual_value)
+        else:
+            actual = normalized_text(actual_value)
         if expected and actual == expected:
             score += 1
 
     return score
 
 
-def find_inventory_row(wb, item, minimum_score=3, early_return_score=5, used_rows=None):
+def find_inventory_row(wb, item, minimum_score=6, early_return_score=8, used_rows=None):
     if used_rows is None:
         used_rows = set()
     preferred_sheet = sheet_for_budget(item.get("budgetType", "Capital"))
@@ -367,7 +391,7 @@ def delete_inventory(wb, data, filepath):
     matches = []
     used_rows = set()
     for item in items:
-        match = find_inventory_row(wb, item, minimum_score=5, early_return_score=5, used_rows=used_rows)
+        match = find_inventory_row(wb, item, minimum_score=6, early_return_score=8, used_rows=used_rows)
         if not match:
             identity = item.get("partNumber") or item.get("description") or "inventory row"
             return {"success": False, "error": f"Could not locate inventory row in Excel for deletion: {identity}"}
