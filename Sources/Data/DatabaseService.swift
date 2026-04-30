@@ -1290,6 +1290,11 @@ final class DatabaseService: @unchecked Sendable {
                         normalized(existingRow.string(named: "budgetType")) != normalized(normalizedBudgetType)
 
                     if hasChanges {
+                        let inventoryID = existingRow.int64(named: "id")
+                        let deployedQuantity = try activeDeployedQuantity(for: inventoryID, db: db)
+                        guard item.quantity >= deployedQuantity else {
+                            throw DatabaseError.stepFailed("Excel sync would reduce \(item.partNumber) below its active deployed quantity (\(deployedQuantity)). Return or delete deployments first.")
+                        }
                         try execute(
                             """
                             UPDATE inventory_items
@@ -1302,7 +1307,7 @@ final class DatabaseService: @unchecked Sendable {
                                 .text(item.itemType), .text(item.description), .text(item.manufacturer), .text(item.partNumber),
                                 .text(item.purchaseDate), .text(item.vendor), .double(item.unitCost), .int(item.quantity),
                                 .int(item.qtyReceived), .text(item.poNumber), .text(item.notes), .text(normalizedBudgetType),
-                                .int64(existingRow.int64(named: "id"))
+                                .int64(inventoryID)
                             ],
                             db: db
                         )
@@ -1547,35 +1552,75 @@ final class DatabaseService: @unchecked Sendable {
     }
 
     func removeDuplicateInventoryItems() throws -> Int {
-        let duplicates = try query(
-            """
-            SELECT id
-            FROM (
-                SELECT
-                  id,
-                  ROW_NUMBER() OVER (
-                    PARTITION BY
-                      CASE WHEN trim(COALESCE(poNumber, '')) <> '' THEN lower(trim(poNumber)) || '|' || lower(trim(partNumber))
-                           ELSE lower(trim(partNumber)) || '|' || quantity || '|' || printf('%.2f', unitCost)
-                      END
-                    ORDER BY createdAt ASC, id ASC
-                  ) AS rowNumber
-                FROM inventory_items
+        try withTransaction { db in
+            let duplicates = try query(
+                """
+                WITH ranked AS (
+                    SELECT
+                      id,
+                      partNumber,
+                      FIRST_VALUE(id) OVER (
+                        PARTITION BY duplicateKey
+                        ORDER BY createdAt ASC, id ASC
+                      ) AS retainedId,
+                      ROW_NUMBER() OVER (
+                        PARTITION BY duplicateKey
+                        ORDER BY createdAt ASC, id ASC
+                      ) AS rowNumber
+                    FROM (
+                        SELECT
+                          id,
+                          partNumber,
+                          createdAt,
+                          CASE WHEN trim(COALESCE(poNumber, '')) <> '' THEN lower(trim(poNumber)) || '|' || lower(trim(partNumber))
+                               ELSE lower(trim(partNumber)) || '|' || quantity || '|' || printf('%.2f', unitCost)
+                          END AS duplicateKey
+                        FROM inventory_items
+                    )
+                )
+                SELECT id, retainedId, COALESCE(partNumber, '') AS partNumber
+                FROM ranked
+                WHERE rowNumber > 1
+                """,
+                db: db
             )
-            WHERE rowNumber > 1
-            """
-        )
 
-        let ids = duplicates.map { $0.int64(named: "id") }
-        for id in ids {
-            try execute("DELETE FROM inventory_items WHERE id = ?", bindings: [.int64(id)])
+            let mappings = duplicates.map {
+                (
+                    duplicateID: $0.int64(named: "id"),
+                    retainedID: $0.int64(named: "retainedId"),
+                    partNumber: $0.string(named: "partNumber")
+                )
+            }
+            guard !mappings.isEmpty else { return 0 }
+
+            let groupedMappings = Dictionary(grouping: mappings) { $0.retainedID }
+            for (retainedID, group) in groupedMappings {
+                let mergedIDs = [retainedID] + group.map(\.duplicateID)
+                let activeQuantity = try activeDeployedQuantity(for: mergedIDs, db: db)
+                let retainedQuantity = try query(
+                    "SELECT quantity FROM inventory_items WHERE id = ? LIMIT 1",
+                    bindings: [.int64(retainedID)],
+                    db: db
+                ).first?.int(named: "quantity") ?? 0
+                guard activeQuantity <= retainedQuantity else {
+                    let partNumber = group.first?.partNumber ?? "duplicate item"
+                    throw DatabaseError.stepFailed("Cannot remove duplicate \(partNumber) rows because their active deployments (\(activeQuantity)) exceed the retained row quantity (\(retainedQuantity)).")
+                }
+            }
+
+            for mapping in mappings {
+                try execute(
+                    "UPDATE deployments SET inventoryItemId = ? WHERE inventoryItemId = ?",
+                    bindings: [.int64(mapping.retainedID), .int64(mapping.duplicateID)],
+                    db: db
+                )
+                try execute("DELETE FROM inventory_items WHERE id = ?", bindings: [.int64(mapping.duplicateID)], db: db)
+            }
+
+            try insertAudit(action: "delete", entityType: "item", entityId: 0, details: "Removed \(mappings.count) duplicate inventory rows", performedBy: NSUserName(), db: db)
+            return mappings.count
         }
-
-        if !ids.isEmpty {
-            try insertAudit(action: "delete", entityType: "item", entityId: 0, details: "Removed \(ids.count) duplicate inventory rows", performedBy: NSUserName())
-        }
-
-        return ids.count
     }
 
     func remainingInventorySnapshots() throws -> [RemainingInventoryUpdate] {
@@ -1801,6 +1846,32 @@ final class DatabaseService: @unchecked Sendable {
             """,
             bindings: [.int64(inventoryItemId)]
         ).int(named: "deployedQuantity")
+    }
+
+    private func activeDeployedQuantity(for inventoryItemId: Int64, db: OpaquePointer?) throws -> Int {
+        try query(
+            """
+            SELECT COALESCE(SUM(qtyDeployed), 0) AS deployedQuantity
+            FROM deployments
+            WHERE inventoryItemId = ? AND returnedAt IS NULL
+            """,
+            bindings: [.int64(inventoryItemId)],
+            db: db
+        ).first?.int(named: "deployedQuantity") ?? 0
+    }
+
+    private func activeDeployedQuantity(for inventoryItemIDs: [Int64], db: OpaquePointer?) throws -> Int {
+        guard !inventoryItemIDs.isEmpty else { return 0 }
+        let placeholders = Array(repeating: "?", count: inventoryItemIDs.count).joined(separator: ",")
+        return try query(
+            """
+            SELECT COALESCE(SUM(qtyDeployed), 0) AS deployedQuantity
+            FROM deployments
+            WHERE returnedAt IS NULL AND inventoryItemId IN (\(placeholders))
+            """,
+            bindings: inventoryItemIDs.map(SQLiteBinding.int64),
+            db: db
+        ).first?.int(named: "deployedQuantity") ?? 0
     }
 
     private func availableQuantity(for inventoryItemId: Int64, db: OpaquePointer?) throws -> Int {

@@ -99,6 +99,73 @@ def main():
         remaining_value = load_workbook(workbook)["Inventory"].cell(row=2, column=12).value
         if remaining_value != 3:
             raise AssertionError(f"update-remaining left remaining inventory at {remaining_value!r}")
+        wb = load_workbook(workbook)
+        ws = wb["Inventory"]
+        ws.append(["Accessory", "Ambiguous Item", "Example Manufacturer", "AMB-1", "2026-04-01", "Example Vendor", 100, 5, "=G3*H3", "5/5", "", 5, "first ambiguous"])
+        ws.append(["Accessory", "Ambiguous Item", "Example Manufacturer", "AMB-1", "2026-04-01", "Example Vendor", 200, 9, "=G4*H4", "9/9", "", 9, "second ambiguous"])
+        wb.save(workbook)
+        run("update-inventory", workbook, {
+            "original": {
+                "itemType": "Accessory",
+                "description": "Ambiguous Item",
+                "manufacturer": "Example Manufacturer",
+                "partNumber": "AMB-1",
+                "purchaseDate": "2026-04-01",
+                "vendor": "Example Vendor",
+                "unitCost": 200,
+                "quantity": 9,
+                "qtyReceived": 9,
+                "poNumber": "",
+                "budgetType": "Capital",
+                "notes": "second ambiguous",
+            },
+            "updated": {
+                "itemType": "Accessory",
+                "description": "Ambiguous Item",
+                "manufacturer": "Example Manufacturer",
+                "partNumber": "AMB-1",
+                "purchaseDate": "2026-04-01",
+                "vendor": "Example Vendor",
+                "unitCost": 200,
+                "quantity": 9,
+                "qtyReceived": 9,
+                "poNumber": "",
+                "budgetType": "Capital",
+                "notes": "second ambiguous updated",
+            },
+        })
+        wb = load_workbook(workbook)
+        ws = wb["Inventory"]
+        ambiguous_rows = [
+            (row, ws.cell(row=row, column=7).value, ws.cell(row=row, column=13).value)
+            for row in range(2, ws.max_row + 1)
+            if ws.cell(row=row, column=4).value == "AMB-1"
+        ]
+        if (100, "first ambiguous") not in [(cost, note) for _, cost, note in ambiguous_rows] or (200, "second ambiguous updated") not in [(cost, note) for _, cost, note in ambiguous_rows]:
+            raise AssertionError("update-inventory matched the wrong no-PO workbook row")
+        run("delete-inventory", workbook, {"items": [{
+            "itemType": "Accessory",
+            "description": "Ambiguous Item",
+            "manufacturer": "Example Manufacturer",
+            "partNumber": "AMB-1",
+            "purchaseDate": "2026-04-01",
+            "vendor": "Example Vendor",
+            "unitCost": 200,
+            "quantity": 9,
+            "qtyReceived": 9,
+            "poNumber": "",
+            "budgetType": "Capital",
+            "notes": "second ambiguous updated",
+        }]})
+        wb = load_workbook(workbook)
+        ws = wb["Inventory"]
+        ambiguous_rows = [
+            (ws.cell(row=row, column=7).value, ws.cell(row=row, column=13).value)
+            for row in range(2, ws.max_row + 1)
+            if ws.cell(row=row, column=4).value == "AMB-1"
+        ]
+        if ambiguous_rows != [(100, "first ambiguous")]:
+            raise AssertionError("delete-inventory removed the wrong no-PO workbook row")
         inventory = run("read-inventory", workbook, {})
         deployed = run("read-deployed", workbook, {})
         if len(inventory.get("items", [])) < 2 or len(deployed.get("deployments", [])) < 1:

@@ -43,6 +43,7 @@ final class AppModel: ObservableObject {
         static let databaseReviewed = "workspace.databaseReviewed"
         static let spreadsheetReviewed = "workspace.spreadsheetReviewed"
         static let lastImportUndoBackupPath = "workspace.lastImportUndoBackupPath"
+        static let lastImportUndoExcelBackupPath = "workspace.lastImportUndoExcelBackupPath"
     }
 
     @Published var selectedSection: AppSection = .dashboard
@@ -99,6 +100,7 @@ final class AppModel: ObservableObject {
     private let lockRetryNanoseconds: UInt64 = 300_000_000
     private let defaults = UserDefaults.standard
     private var recentErrorMessages: [String] = []
+    private var lastImportUndoExcelBackupURL: URL?
 
     init() {
         let databaseURL = Self.initialDatabaseURL()
@@ -110,6 +112,9 @@ final class AppModel: ObservableObject {
         self.databaseService = DatabaseService(databaseURL: databaseURL)
         if let undoPath = defaults.string(forKey: DefaultsKey.lastImportUndoBackupPath), !undoPath.isEmpty {
             self.lastImportUndoBackupURL = URL(fileURLWithPath: undoPath)
+        }
+        if let excelUndoPath = defaults.string(forKey: DefaultsKey.lastImportUndoExcelBackupPath), !excelUndoPath.isEmpty {
+            self.lastImportUndoExcelBackupURL = URL(fileURLWithPath: excelUndoPath)
         }
     }
 
@@ -618,9 +623,41 @@ final class AppModel: ObservableObject {
             return
         }
 
-        await restoreDatabase(from: backupURL)
+        var currentExcelRollbackURL: URL?
+        do {
+            if let excelBackupURL = lastImportUndoExcelBackupURL {
+                guard !excelInventoryPath.isEmpty else {
+                    throw DatabaseError.stepFailed("Reconnect the Excel workbook before undoing this import.")
+                }
+                guard FileManager.default.fileExists(atPath: excelBackupURL.path) else {
+                    throw DatabaseError.stepFailed("The Excel undo backup could not be found.")
+                }
+                currentExcelRollbackURL = try createExcelWorkbookRollbackBackup()
+                try restoreExcelWorkbook(from: excelBackupURL)
+            }
+        } catch {
+            removeExcelWorkbookRollbackBackup(currentExcelRollbackURL)
+            errorMessage = error.localizedDescription
+            return
+        }
+
+        let restored = await restoreDatabase(from: backupURL)
+        guard restored else {
+            if let currentExcelRollbackURL {
+                try? restoreExcelWorkbook(from: currentExcelRollbackURL)
+                removeExcelWorkbookRollbackBackup(currentExcelRollbackURL)
+            }
+            return
+        }
+
+        removeExcelWorkbookRollbackBackup(currentExcelRollbackURL)
+        if let excelBackupURL = lastImportUndoExcelBackupURL {
+            try? FileManager.default.removeItem(at: excelBackupURL)
+        }
         defaults.removeObject(forKey: DefaultsKey.lastImportUndoBackupPath)
+        defaults.removeObject(forKey: DefaultsKey.lastImportUndoExcelBackupPath)
         lastImportUndoBackupURL = nil
+        lastImportUndoExcelBackupURL = nil
         lastImportSummary = "Last import undone by restoring \(backupURL.lastPathComponent)."
     }
 
@@ -706,9 +743,15 @@ final class AppModel: ObservableObject {
         return destinationURL
     }
 
-    private func rememberImportUndoBackup(_ url: URL) {
+    private func rememberImportUndoBackup(_ url: URL, excelBackupURL: URL? = nil) {
         lastImportUndoBackupURL = url
+        lastImportUndoExcelBackupURL = excelBackupURL
         defaults.set(url.path, forKey: DefaultsKey.lastImportUndoBackupPath)
+        if let excelBackupURL {
+            defaults.set(excelBackupURL.path, forKey: DefaultsKey.lastImportUndoExcelBackupPath)
+        } else {
+            defaults.removeObject(forKey: DefaultsKey.lastImportUndoExcelBackupPath)
+        }
         refreshBackupRecords()
     }
 
@@ -735,6 +778,24 @@ final class AppModel: ObservableObject {
         try fileManager.copyItem(at: sourceURL, to: rollbackURL)
         AppLog.excelSync.info("Created Excel rollback backup")
         return rollbackURL
+    }
+
+    private func createImportUndoExcelBackup(label: String) throws -> URL {
+        let sourceURL = URL(fileURLWithPath: excelInventoryPath)
+        let fileManager = FileManager.default
+        let backupsDirectory = databaseURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("Backups", isDirectory: true)
+            .appendingPathComponent("Before Imports", isDirectory: true)
+        try fileManager.createDirectory(at: backupsDirectory, withIntermediateDirectories: true)
+
+        let timestamp = Self.backupTimestampFormatter.string(from: Date())
+        let pathExtension = sourceURL.pathExtension.isEmpty ? "xlsx" : sourceURL.pathExtension
+        let backupURL = backupsDirectory
+            .appendingPathComponent("InventoryWorkbook-before-\(label)-import-\(timestamp)")
+            .appendingPathExtension(pathExtension)
+        try fileManager.copyItem(at: sourceURL, to: backupURL)
+        return backupURL
     }
 
     private func removeExcelWorkbookRollbackBackup(_ rollbackURL: URL?) {
@@ -813,7 +874,8 @@ final class AppModel: ObservableObject {
             databaseURL.deletingLastPathComponent(),
             databaseURL.deletingLastPathComponent().appendingPathComponent("Backups", isDirectory: true),
             databaseURL.deletingLastPathComponent().appendingPathComponent("Backups", isDirectory: true).appendingPathComponent("Before Imports", isDirectory: true),
-            databaseURL.deletingLastPathComponent().appendingPathComponent("Backups", isDirectory: true).appendingPathComponent("Before Updates", isDirectory: true)
+            databaseURL.deletingLastPathComponent().appendingPathComponent("Backups", isDirectory: true).appendingPathComponent("Before Updates", isDirectory: true),
+            databaseURL.deletingLastPathComponent().appendingPathComponent("Backups", isDirectory: true).appendingPathComponent("Before Restores", isDirectory: true)
         ]
 
         var recordsByPath: [String: BackupRecord] = [:]
@@ -824,7 +886,7 @@ final class AppModel: ObservableObject {
                 options: [.skipsHiddenFiles]
             ) else { continue }
 
-            for url in urls where url.pathExtension.lowercased() == "sqlite" && url.path != databaseURL.path {
+            for url in urls where url.pathExtension.lowercased() == "sqlite" && url.path != databaseURL.path && isManagedBackupFile(url) {
                 let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey])
                 guard values?.isRegularFile != false else { continue }
                 recordsByPath[url.path] = BackupRecord(
@@ -861,14 +923,32 @@ final class AppModel: ObservableObject {
         let databaseService = self.databaseService
         try await retryingDatabaseCall { try databaseService.checkpointForBackup() }
         let fileManager = FileManager.default
-        try fileManager.createDirectory(at: destinationURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        if fileManager.fileExists(atPath: destinationURL.path) {
-            try fileManager.removeItem(at: destinationURL)
+
+        let sourceURL = databaseURL.standardizedFileURL.resolvingSymlinksInPath()
+        let targetURL = destinationURL.standardizedFileURL.resolvingSymlinksInPath()
+        guard sourceURL.path != targetURL.path else {
+            throw DatabaseError.stepFailed("Choose a backup destination that is different from the active workspace database.")
         }
-        try fileManager.copyItem(at: databaseURL, to: destinationURL)
+
+        try fileManager.createDirectory(at: destinationURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let temporaryURL = destinationURL
+            .deletingLastPathComponent()
+            .appendingPathComponent(".\(destinationURL.lastPathComponent).backup-\(UUID().uuidString)")
+        do {
+            try fileManager.copyItem(at: databaseURL, to: temporaryURL)
+            if fileManager.fileExists(atPath: destinationURL.path) {
+                _ = try fileManager.replaceItemAt(destinationURL, withItemAt: temporaryURL)
+            } else {
+                try fileManager.moveItem(at: temporaryURL, to: destinationURL)
+            }
+        } catch {
+            try? fileManager.removeItem(at: temporaryURL)
+            throw error
+        }
     }
 
-    func restoreDatabase(from sourceURL: URL) async {
+    @discardableResult
+    func restoreDatabase(from sourceURL: URL) async -> Bool {
         do {
             let fileManager = FileManager.default
             let targetURL = databaseURL
@@ -877,7 +957,11 @@ final class AppModel: ObservableObject {
             }
 
             try fileManager.createDirectory(at: targetURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-            let backupURL = targetURL.deletingLastPathComponent().appendingPathComponent("InventoryData-before-restore-\(Int(Date().timeIntervalSince1970)).sqlite")
+            let backupURL = targetURL
+                .deletingLastPathComponent()
+                .appendingPathComponent("Backups", isDirectory: true)
+                .appendingPathComponent("Before Restores", isDirectory: true)
+                .appendingPathComponent("InventoryData-before-restore-\(Int(Date().timeIntervalSince1970)).sqlite")
             let restoreCandidateURL = targetURL
                 .deletingLastPathComponent()
                 .appendingPathComponent(".\(targetURL.lastPathComponent).restore-\(UUID().uuidString)")
@@ -902,9 +986,18 @@ final class AppModel: ObservableObject {
                 ? "Database restored. Previous database backed up as \(backupURL.lastPathComponent)."
                 : "Database restored."
             await load()
+            return true
         } catch {
             errorMessage = error.localizedDescription
+            return false
         }
+    }
+
+    private func isManagedBackupFile(_ url: URL) -> Bool {
+        let name = url.lastPathComponent
+        return name.hasPrefix("InventoryData-before-") ||
+            name.hasPrefix("InventoryData-pre-update-") ||
+            name.hasPrefix("InventoryData-manual-backup-")
     }
 
     private func sqliteSidecarURLs(for url: URL) -> [URL] {
@@ -965,18 +1058,31 @@ final class AppModel: ObservableObject {
     func saveParsedItems() async {
         guard !parsedImportItems.isEmpty else { return }
 
+        var excelUndoURL: URL?
+        var excelUndoBackupIsPartOfUndo = false
         do {
             let undoURL = try await createImportUndoBackup(label: "pdf")
             let itemsToSave = parsedImportItems
+            if !excelInventoryPath.isEmpty {
+                excelUndoURL = try createImportUndoExcelBackup(label: "pdf")
+            }
             let databaseService = self.databaseService
             let result = try await retryingDatabaseCall { try databaseService.insertParsedItems(itemsToSave) }
 
             if !excelInventoryPath.isEmpty {
                 if !result.insertedItems.isEmpty {
+                    rememberImportUndoBackup(undoURL, excelBackupURL: excelUndoURL)
+                    excelUndoBackupIsPartOfUndo = true
                     try excelSyncService.appendInventory(result.insertedItems, to: excelInventoryPath)
                     try await syncRemainingInventoryIfNeeded()
                     persistExcelSyncMarker()
+                } else {
+                    removeExcelWorkbookRollbackBackup(excelUndoURL)
+                    excelUndoURL = nil
+                    rememberImportUndoBackup(undoURL)
                 }
+            } else {
+                rememberImportUndoBackup(undoURL)
             }
 
             let insertedCount = result.insertedItems.count
@@ -985,10 +1091,12 @@ final class AppModel: ObservableObject {
             } else {
                 lastImportSummary = "Saved \(insertedCount) parsed PDF item(s) into inventory."
             }
-            rememberImportUndoBackup(undoURL)
             parsedImportItems = []
             await load()
         } catch {
+            if !excelUndoBackupIsPartOfUndo {
+                removeExcelWorkbookRollbackBackup(excelUndoURL)
+            }
             errorMessage = error.localizedDescription
         }
     }
