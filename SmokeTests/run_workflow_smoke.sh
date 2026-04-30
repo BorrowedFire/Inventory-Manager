@@ -14,6 +14,7 @@ swiftc \
   -module-cache-path "$BUILD_CACHE" \
   "$ROOT/Sources/Data/DatabaseService.swift" \
   "$ROOT/Sources/Models/Models.swift" \
+  "$ROOT/Sources/Support/AppLog.swift" \
   "$ROOT/Sources/Services/ExcelSyncService.swift" \
   "$ROOT/Sources/Services/PDFImportService.swift" \
   "$ROOT/SmokeTests/workflow_smoke.swift" \

@@ -216,6 +216,8 @@ final class ExcelSyncService: @unchecked Sendable {
             throw NSError(domain: "ExcelSyncService", code: 1, userInfo: [NSLocalizedDescriptionKey: "Could not locate excel_sync.py"])
         }
 
+        AppLog.excelSync.debug("Running Excel command: \(command, privacy: .public)")
+
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
         process.arguments = [scriptPath, command, excelPath]
@@ -248,10 +250,16 @@ final class ExcelSyncService: @unchecked Sendable {
 
         if process.terminationStatus != 0 {
             let stderrText = String(data: stderr, encoding: .utf8) ?? "Unknown Python error"
+            AppLog.excelSync.error("Excel command failed: \(command, privacy: .public)")
             throw NSError(domain: "ExcelSyncService", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: stderrText])
         }
 
-        return try JSONDecoder().decode(T.self, from: stdout)
+        do {
+            return try JSONDecoder().decode(T.self, from: stdout)
+        } catch {
+            AppLog.excelSync.error("Excel command returned invalid JSON: \(command, privacy: .public)")
+            throw error
+        }
     }
 
     private func validateSuccess(_ response: ExcelSyncResponse) throws {

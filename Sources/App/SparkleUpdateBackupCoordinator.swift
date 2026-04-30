@@ -41,14 +41,17 @@ final class SparkleUpdateBackupCoordinator: NSObject, SPUUpdaterDelegate {
             defer { installPreparationInProgress = false }
 
             guard showAppManagementNoticeIfNeeded() else {
+                AppLog.updates.info("User paused update at App Management notice")
                 model.errorMessage = "Update paused. Choose Check for Updates when you are ready to continue."
                 return
             }
 
             do {
                 _ = try await model.createPreUpdateBackup(reason: reason)
+                AppLog.updates.info("Pre-update backup completed")
                 installHandler()
             } catch {
+                AppLog.updates.error("Pre-update backup failed: \(error.localizedDescription, privacy: .private)")
                 model.errorMessage = "Update paused because the pre-update backup failed: \(error.localizedDescription)"
             }
         }
@@ -79,6 +82,7 @@ final class SparkleUpdateBackupCoordinator: NSObject, SPUUpdaterDelegate {
         let accepted = alert.runModal() == .alertFirstButtonReturn
         if accepted, alert.suppressionButton?.state == .on {
             defaults.set(true, forKey: DefaultsKey.appManagementNoticeSuppressed)
+            AppLog.updates.info("User suppressed future App Management notices")
         }
         return accepted
     }

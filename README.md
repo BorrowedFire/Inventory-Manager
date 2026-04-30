@@ -21,6 +21,7 @@ It is designed for small teams that need a straightforward desktop inventory dat
 - PDF-assisted item parsing with drag-and-drop support and generic fallback extraction
 - CSV export and blank inventory template export
 - Database backup/restore controls
+- User-initiated support bundle generation for diagnostics and recent app logs
 - macOS sidebar, tables, Settings scene, toolbar actions, and keyboard shortcuts
 - Local security/build/smoke check scripts
 - Developer ID notarization and DMG helper scripts for later distribution

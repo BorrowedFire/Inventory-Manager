@@ -7,6 +7,7 @@ Use this checklist before publishing a public Inventory Manager release.
 - Set `MARKETING_VERSION` in `project.yml` to the public version, starting at `0.1.0`.
 - Increment `CURRENT_PROJECT_VERSION` for every shipped build.
 - Regenerate the Xcode project with `xcodegen generate`.
+- Commit and push the version bump to `main` before running the release script. The release script validates that local `main` matches `origin/main` and no tracked files are dirty.
 
 ## Local quality gate
 
