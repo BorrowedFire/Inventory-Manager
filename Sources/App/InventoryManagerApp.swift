@@ -24,9 +24,9 @@ struct InventoryManagerApp: App {
     var body: some Scene {
         WindowGroup {
             MainView(model: model)
-                .frame(minWidth: 1450, minHeight: 920)
+                .frame(minWidth: 1180, minHeight: 760)
         }
-        .defaultSize(width: 1500, height: 960)
+        .defaultSize(width: 1280, height: 820)
         .windowResizability(.contentSize)
         .commands {
             CommandGroup(after: .newItem) {
@@ -92,7 +92,7 @@ struct InventoryManagerApp: App {
                 }
 
                 Button("Report Problem…") {
-                    Task { await model.createSupportBundle() }
+                    model.requestCommand(.reportProblem)
                 }
             }
 

@@ -14,7 +14,7 @@ Inventory Manager is a local-first macOS app built with SwiftUI, SQLite, PDFKit,
 
 ## Data policy
 
-SQLite is the canonical app database. Excel is an optional compatibility surface, not the source of truth. Most mutations are written to SQLite first, then synchronized outward when a workbook is configured. Destructive workbook-linked deletes first create a temporary workbook rollback backup, remove matching workbook rows, and then delete from SQLite so the next workbook import cannot resurrect deleted rows.
+SQLite is the canonical app database. Excel is an optional compatibility surface, not the source of truth. Most mutations are written to SQLite first, then synchronized outward when a workbook is configured. Destructive workbook-linked deletes first create a temporary workbook rollback backup, remove matching workbook rows, and then delete from SQLite so the next workbook import cannot resurrect deleted rows. If SQLite deletion succeeds but a later remaining-inventory sync fails, the workbook delete is preserved and the user is asked to rerun remaining sync after fixing the workbook issue.
 
 Runtime databases, exports, packaged apps, and credentials must never be committed.
 
@@ -28,8 +28,8 @@ Local builds are signed ad hoc. Public/team builds should use Developer ID Appli
 
 ## Release-safety safeguards
 
-The app keeps import undo backups under `Backups/Before Imports`, pre-update backups under `Backups/Before Updates`, and records schema milestone `release_safety_backups_and_import_preview` for migration fixture coverage. The import preview UI is intentionally read-only before the destructive import step.
+The app keeps import undo backups under `Backups/Before Imports`, pre-update backups under `Backups/Before Updates`, and records schema milestone `release_safety_backups_and_import_preview` for migration fixture coverage. Restore creates a checkpointed pre-restore backup and removes stale SQLite WAL/SHM sidecars before opening the restored database. The import preview UI is intentionally read-only before the destructive import step.
 
 ## Support diagnostics
 
-`Report Problem...` creates a user-initiated support bundle under Application Support. The bundle contains app/version metadata, bounded recent unified logs, recent in-app error messages, and matching crash reports. It intentionally excludes the SQLite database and Excel workbook contents by default.
+`Report Problem...` shows a disclosure sheet before creating a user-initiated support bundle under Application Support. The bundle contains app/version metadata, bounded recent unified logs, recent in-app error messages, and matching crash reports. It intentionally excludes the SQLite database and Excel workbook contents by default.

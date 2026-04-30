@@ -70,7 +70,8 @@ enum InstallHelper {
     static func moveToApplications() throws -> URL {
         let fileManager = FileManager.default
         let sourceURL = Bundle.main.bundleURL.resolvingSymlinksInPath()
-        let targetURL = URL(fileURLWithPath: "/Applications", isDirectory: true)
+        let applicationsURL = URL(fileURLWithPath: "/Applications", isDirectory: true)
+        let targetURL = applicationsURL
             .appendingPathComponent(sourceURL.lastPathComponent)
             .resolvingSymlinksInPath()
 
@@ -88,10 +89,24 @@ enum InstallHelper {
             }
 
             AppLog.app.info("Replacing older Applications copy")
-            try fileManager.trashItem(at: targetURL, resultingItemURL: nil)
         }
 
-        try fileManager.copyItem(at: sourceURL, to: targetURL)
+        let stagedURL = applicationsURL
+            .appendingPathComponent(".\(sourceURL.deletingPathExtension().lastPathComponent)-install-\(UUID().uuidString)")
+            .appendingPathExtension(sourceURL.pathExtension)
+
+        do {
+            try fileManager.copyItem(at: sourceURL, to: stagedURL)
+            if fileManager.fileExists(atPath: targetURL.path) {
+                _ = try fileManager.replaceItemAt(targetURL, withItemAt: stagedURL)
+            } else {
+                try fileManager.moveItem(at: stagedURL, to: targetURL)
+            }
+        } catch {
+            try? fileManager.removeItem(at: stagedURL)
+            throw error
+        }
+
         return targetURL
     }
 
