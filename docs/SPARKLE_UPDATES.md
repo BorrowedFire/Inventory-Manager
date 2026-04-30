@@ -57,4 +57,5 @@ https://github.com/BorrowedFire/Inventory-Manager/releases/latest/download/appca
 
 - GitHub Release publishing is intentionally not automatic yet.
 - Appcast generation should happen only after the final notarized zip is built.
+- Inventory Manager is not sandboxed, so do not enable Sparkle's sandbox-only `SUEnableInstallerLauncherService` flag unless the app is moved to an App Sandbox configuration with the required XPC service setup.
 - If you move release hosting later, update `SUFeedURL` in `Resources/Info.plist` before shipping that version.

@@ -18,8 +18,6 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
-	<key>SUEnableInstallerLauncherService</key>
-	<true/>
 	<key>SUFeedURL</key>
 	<string>https://github.com/BorrowedFire/Inventory-Manager/releases/latest/download/appcast.xml</string>
 	<key>SUPublicEDKey</key>
