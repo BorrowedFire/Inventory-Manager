@@ -37,12 +37,13 @@ struct MainView: View {
     @State private var confirmClearParsedPDFs = false
     @State private var showSupportBundleDisclosure = false
     @State private var inventorySelection: Set<Int64> = []
+    @State private var deploymentSelection: Set<Int64> = []
     @AppStorage(AppAppearancePreference.storageKey) private var appearancePreference = AppAppearancePreference.dark.rawValue
 
     var body: some View {
         NavigationSplitView {
             sidebar
-                .navigationSplitViewColumnWidth(min: 250, ideal: 280, max: 340)
+                .navigationSplitViewColumnWidth(min: 220, ideal: 280, max: 340)
         } detail: {
             detail
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -798,10 +799,10 @@ struct MainView: View {
             TableColumn("Actions") { item in
                 HStack(spacing: 8) {
                     Button("Edit") {
-                        inventoryEditorItem = item
+                        editInventoryItem(item)
                     }
                     Button("Deploy") {
-                        deploymentDraft = DeploymentSheetModel(item: item)
+                        deployInventoryItem(item)
                     }
                     .disabled(item.availableQuantity <= 0)
                     Button("Delete", role: .destructive) {
@@ -825,10 +826,22 @@ struct MainView: View {
             }
             model.selectedInventoryID = selectedID
         }
+        .contextMenu(forSelectionType: Int64.self) { selection in
+            if let item = inventoryItem(for: selection) {
+                inventoryContextMenu(for: item)
+            } else {
+                Button("No Inventory Item Selected") {}
+                    .disabled(true)
+            }
+        } primaryAction: { selection in
+            if let item = inventoryItem(for: selection) {
+                editInventoryItem(item)
+            }
+        }
     }
 
     private var deploymentTable: some View {
-        Table(model.filteredDeployments) {
+        Table(model.filteredDeployments, selection: $deploymentSelection) {
             TableColumn("Type") { deployment in
                 HStack(spacing: 8) {
                     ItemTypeIconView(itemType: deployment.itemType, size: 14)
@@ -887,6 +900,14 @@ struct MainView: View {
                 .buttonStyle(.borderless)
             }
             .width(140)
+        }
+        .contextMenu(forSelectionType: Int64.self) { selection in
+            if let deployment = deployment(for: selection) {
+                deploymentContextMenu(for: deployment)
+            } else {
+                Button("No Deployment Selected") {}
+                    .disabled(true)
+            }
         }
     }
 
@@ -955,6 +976,157 @@ struct MainView: View {
 
     private var focusedInventoryItem: InventoryItemRecord? {
         model.selectedInventory ?? model.filteredInventory.first
+    }
+
+    private func inventoryItem(for selection: Set<Int64>) -> InventoryItemRecord? {
+        let selectedID = selection.first ?? inventorySelection.first ?? model.selectedInventoryID
+        guard let selectedID else { return nil }
+        return model.filteredInventory.first(where: { $0.id == selectedID }) ?? model.inventory.first(where: { $0.id == selectedID })
+    }
+
+    private func deployment(for selection: Set<Int64>) -> DeploymentRecord? {
+        guard let selectedID = selection.first ?? deploymentSelection.first else { return nil }
+        return model.filteredDeployments.first(where: { $0.id == selectedID }) ?? model.deployments.first(where: { $0.id == selectedID })
+    }
+
+    private func focusInventoryItem(_ item: InventoryItemRecord) {
+        inventorySelection = [item.id]
+        model.selectedInventoryID = item.id
+    }
+
+    private func editInventoryItem(_ item: InventoryItemRecord) {
+        focusInventoryItem(item)
+        inventoryEditorItem = item
+    }
+
+    private func deployInventoryItem(_ item: InventoryItemRecord) {
+        focusInventoryItem(item)
+        deploymentDraft = DeploymentSheetModel(item: item)
+    }
+
+    private func duplicateInventoryItem(_ item: InventoryItemRecord) {
+        focusInventoryItem(item)
+        inventoryEditorItem = InventoryItemRecord(
+            id: 0,
+            itemType: item.itemType,
+            description: item.description,
+            manufacturer: item.manufacturer,
+            partNumber: item.partNumber,
+            purchaseDate: item.purchaseDate,
+            vendor: item.vendor,
+            unitCost: item.unitCost,
+            quantity: item.quantity,
+            qtyReceived: item.qtyReceived,
+            poNumber: item.poNumber,
+            notes: item.notes,
+            budgetType: item.budgetType,
+            stockroomId: item.stockroomId,
+            stockroomName: item.stockroomName,
+            availableQuantity: item.quantity,
+            updatedAt: ""
+        )
+    }
+
+    private func copyToPasteboard(_ value: String) {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(trimmed, forType: .string)
+    }
+
+    @ViewBuilder
+    private func inventoryContextMenu(for item: InventoryItemRecord) -> some View {
+        Button {
+            editInventoryItem(item)
+        } label: {
+            Label("Edit Item", systemImage: "pencil")
+        }
+
+        Button {
+            duplicateInventoryItem(item)
+        } label: {
+            Label("Duplicate as New Item", systemImage: "plus.square.on.square")
+        }
+
+        Button {
+            deployInventoryItem(item)
+        } label: {
+            Label("Deploy Item", systemImage: "arrowshape.turn.up.right")
+        }
+        .disabled(item.availableQuantity <= 0)
+
+        Divider()
+
+        Button {
+            copyToPasteboard(item.partNumber)
+        } label: {
+            Label("Copy Part Number", systemImage: "doc.on.doc")
+        }
+        .disabled(item.partNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+        Button {
+            copyToPasteboard(item.poNumber)
+        } label: {
+            Label("Copy PO Number", systemImage: "doc.on.doc")
+        }
+        .disabled(item.poNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+        Button {
+            model.openInventoryDrilldown(stockroom: item.stockroomName)
+        } label: {
+            Label("Filter to Stockroom", systemImage: "line.3.horizontal.decrease.circle")
+        }
+        .disabled(item.stockroomName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || item.stockroomName == "Unassigned")
+
+        Divider()
+
+        Button(role: .destructive) {
+            focusInventoryItem(item)
+            inventoryToDelete = item
+        } label: {
+            Label("Delete Item", systemImage: "trash")
+        }
+    }
+
+    @ViewBuilder
+    private func deploymentContextMenu(for deployment: DeploymentRecord) -> some View {
+        Button {
+            deploymentToReturn = deployment
+        } label: {
+            Label("Mark Returned", systemImage: "arrow.uturn.backward.circle")
+        }
+        .disabled(deployment.isReturned)
+
+        Button {
+            model.openInventoryDrilldown(partNumber: deployment.partNumber)
+        } label: {
+            Label("Find Inventory Item", systemImage: "shippingbox")
+        }
+        .disabled(deployment.partNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+        Divider()
+
+        Button {
+            copyToPasteboard(deployment.partNumber)
+        } label: {
+            Label("Copy Part Number", systemImage: "doc.on.doc")
+        }
+        .disabled(deployment.partNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+        Button {
+            copyToPasteboard(deployment.deployedTo)
+        } label: {
+            Label("Copy Deployed To", systemImage: "doc.on.doc")
+        }
+        .disabled(deployment.deployedTo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+        Divider()
+
+        Button(role: .destructive) {
+            deploymentToDelete = deployment
+        } label: {
+            Label("Delete Deployment", systemImage: "trash")
+        }
     }
 
     private func sanitizeAppearancePreference() {
@@ -1077,6 +1249,26 @@ struct MainView: View {
                             )
                         }
                         .buttonStyle(.plain)
+                        .contextMenu {
+                            Button {
+                                model.selectedStockroomID = stockroom.id
+                                stockroomDraft = StockroomDraft(id: stockroom.id, name: stockroom.name, location: stockroom.location, department: stockroom.department)
+                            } label: {
+                                Label("Edit Stockroom", systemImage: "pencil")
+                            }
+                            Button {
+                                model.openInventoryDrilldown(stockroom: stockroom.name)
+                            } label: {
+                                Label("Open in Inventory", systemImage: "shippingbox")
+                            }
+                            Divider()
+                            Button(role: .destructive) {
+                                model.selectedStockroomID = stockroom.id
+                                stockroomToDelete = stockroom
+                            } label: {
+                                Label("Delete Stockroom", systemImage: "trash")
+                            }
+                        }
                     }
                 }
                 .frame(width: 300, alignment: .topLeading)
@@ -1146,6 +1338,10 @@ struct MainView: View {
                                             .foregroundStyle(item.availableQuantity == 0 ? AppTheme.rose : AppTheme.teal)
                                     }
                                     .padding(.vertical, 10)
+                                    .contentShape(Rectangle())
+                                    .contextMenu {
+                                        inventoryContextMenu(for: item)
+                                    }
                                     Divider()
                                 }
                             }
@@ -1293,7 +1489,7 @@ struct MainView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Workspace Details")
                         .font(.headline)
-                    HStack {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 12, alignment: .top)], alignment: .leading, spacing: 12) {
                         VStack(alignment: .leading, spacing: 6) {
                             Text("App Name")
                                 .font(.caption.weight(.semibold))
@@ -1312,77 +1508,77 @@ struct MainView: View {
                             Label("Save Branding", systemImage: "checkmark.circle")
                         }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
                 Divider()
 
-                HStack {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Workspace Database")
-                            .font(.headline)
-                        Text(model.databaseURL.path)
-                            .textSelection(.enabled)
-                            .foregroundStyle(AppTheme.muted)
-                        Text("This SQLite database can be backed up, restored, or swapped for another workspace.")
-                            .font(.caption)
-                            .foregroundStyle(AppTheme.muted)
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .top, spacing: 16) {
+                        workspaceDatabaseSummary
+                        Spacer(minLength: 16)
+                        Text("\(model.inventory.count) inventory items")
+                            .font(.headline.monospacedDigit())
+                            .lineLimit(1)
                     }
-                    Spacer()
-                    Text("\(model.inventory.count) inventory items")
-                        .font(.headline.monospacedDigit())
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        workspaceDatabaseSummary
+                        Text("\(model.inventory.count) inventory items")
+                            .font(.headline.monospacedDigit())
+                            .lineLimit(1)
+                    }
                 }
 
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack {
-                        Button {
-                            if let url = FileDialogs.chooseDatabaseFile() {
-                                Task { await model.useDatabase(at: url) }
-                            }
-                        } label: {
-                            Label("Choose Existing Database", systemImage: "externaldrive.badge.plus")
+                adaptiveActionGrid(minimumWidth: 230) {
+                    Button {
+                        if let url = FileDialogs.chooseDatabaseFile() {
+                            Task { await model.useDatabase(at: url) }
                         }
-                        Button {
-                            if let url = FileDialogs.chooseDatabaseSaveURL(defaultName: "InventoryData.sqlite") {
-                                Task { await model.createDatabase(at: url) }
-                            }
-                        } label: {
-                            Label("Create New Database", systemImage: "plus.square.on.square")
+                    } label: {
+                        Label("Choose Existing Database", systemImage: "externaldrive.badge.plus")
+                    }
+                    Button {
+                        if let url = FileDialogs.chooseDatabaseSaveURL(defaultName: "InventoryData.sqlite") {
+                            Task { await model.createDatabase(at: url) }
                         }
-                        Button {
-                            Task { await model.createDatabaseAtDefaultLocation() }
-                        } label: {
-                            Label("Use Default Workspace Location", systemImage: "location")
+                    } label: {
+                        Label("Create New Database", systemImage: "plus.square.on.square")
+                    }
+                    Button {
+                        Task { await model.createDatabaseAtDefaultLocation() }
+                    } label: {
+                        Label("Use Default Location", systemImage: "location")
+                    }
+                    Button {
+                        if let url = FileDialogs.chooseDatabaseSaveURL(defaultName: "InventoryData Backup.sqlite") {
+                            Task { await model.backupDatabase(to: url) }
                         }
-                        Button {
-                            if let url = FileDialogs.chooseDatabaseSaveURL(defaultName: "InventoryData Backup.sqlite") {
-                                Task { await model.backupDatabase(to: url) }
-                            }
-                        } label: {
-                            Label("Back Up Database", systemImage: "clock.arrow.circlepath")
+                    } label: {
+                        Label("Back Up Database", systemImage: "clock.arrow.circlepath")
+                    }
+                    Button {
+                        if let url = FileDialogs.chooseDatabaseFile() {
+                            databaseToRestore = url
                         }
-                        Button {
-                            if let url = FileDialogs.chooseDatabaseFile() {
-                                databaseToRestore = url
-                            }
-                        } label: {
-                            Label("Restore Database", systemImage: "arrow.counterclockwise")
-                        }
-                        Button {
-                            FileDialogs.revealInFinder(model.databaseURL)
-                        } label: {
-                            Label("Reveal in Finder", systemImage: "folder")
-                        }
-                        Button {
-                            Task { await model.loadDemoWorkspace() }
-                        } label: {
-                            Label("Load Demo Data", systemImage: "sparkles")
-                        }
-                        .disabled(!model.isWorkspaceEmpty)
-                        Button {
-                            model.refreshBackupRecords()
-                        } label: {
-                            Label("Refresh Backups", systemImage: "arrow.clockwise")
-                        }
+                    } label: {
+                        Label("Restore Database", systemImage: "arrow.counterclockwise")
+                    }
+                    Button {
+                        FileDialogs.revealInFinder(model.databaseURL)
+                    } label: {
+                        Label("Reveal in Finder", systemImage: "folder")
+                    }
+                    Button {
+                        Task { await model.loadDemoWorkspace() }
+                    } label: {
+                        Label("Load Demo Data", systemImage: "sparkles")
+                    }
+                    .disabled(!model.isWorkspaceEmpty)
+                    Button {
+                        model.refreshBackupRecords()
+                    } label: {
+                        Label("Refresh Backups", systemImage: "arrow.clockwise")
                     }
                 }
 
@@ -1397,64 +1593,62 @@ struct MainView: View {
                         .textSelection(.enabled)
                         .foregroundStyle(AppTheme.muted)
 
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack {
-                            Button {
-                                if let url = FileDialogs.chooseExcelFile() {
-                                    model.setExcelInventoryPath(url.path)
+                    adaptiveActionGrid(minimumWidth: 225) {
+                        Button {
+                            if let url = FileDialogs.chooseExcelFile() {
+                                model.setExcelInventoryPath(url.path)
+                            }
+                        } label: {
+                            Label("Choose Excel File", systemImage: "tablecells")
+                        }
+                        Button {
+                            Task { await model.importFromExcel() }
+                        } label: {
+                            Label("Import from Excel", systemImage: "square.and.arrow.down")
+                        }
+                        .disabled(model.excelInventoryPath.isEmpty)
+                        Button {
+                            if let url = FileDialogs.chooseCSVFile() {
+                                Task { await model.importFromCSV(url: url) }
+                            }
+                        } label: {
+                            Label("Import CSV", systemImage: "doc.text")
+                        }
+                        Button {
+                            Task { await model.previewExcelImport() }
+                        } label: {
+                            Label("Preview Import", systemImage: "doc.text.magnifyingglass")
+                        }
+                        .disabled(model.excelInventoryPath.isEmpty)
+                        Button {
+                            Task {
+                                do {
+                                    try await model.syncRemainingInventoryIfNeeded()
+                                } catch {
+                                    model.errorMessage = error.localizedDescription
                                 }
-                            } label: {
-                                Label("Choose Excel File", systemImage: "tablecells")
                             }
-                            Button {
-                                Task { await model.importFromExcel() }
-                            } label: {
-                                Label("Import from Excel", systemImage: "square.and.arrow.down")
+                        } label: {
+                            Label("Sync Remaining", systemImage: "arrow.triangle.2.circlepath")
+                        }
+                        .disabled(model.excelInventoryPath.isEmpty)
+                        Button {
+                            model.clearExcelInventoryPath()
+                        } label: {
+                            Label("Clear Path", systemImage: "xmark.circle")
+                        }
+                        .disabled(model.excelInventoryPath.isEmpty)
+                        Button {
+                            model.acknowledgeSpreadsheetSetup()
+                        } label: {
+                            Label("Skip Excel for Now", systemImage: "forward")
+                        }
+                        Button {
+                            if let url = FileDialogs.chooseCSVSaveURL(defaultName: "Inventory Template.csv") {
+                                Task { await model.exportBlankInventoryTemplateCSV(to: url) }
                             }
-                            .disabled(model.excelInventoryPath.isEmpty)
-                            Button {
-                                if let url = FileDialogs.chooseCSVFile() {
-                                    Task { await model.importFromCSV(url: url) }
-                                }
-                            } label: {
-                                Label("Import CSV", systemImage: "doc.text")
-                            }
-                            Button {
-                                Task { await model.previewExcelImport() }
-                            } label: {
-                                Label("Preview Import", systemImage: "doc.text.magnifyingglass")
-                            }
-                            .disabled(model.excelInventoryPath.isEmpty)
-                            Button {
-                                Task {
-                                    do {
-                                        try await model.syncRemainingInventoryIfNeeded()
-                                    } catch {
-                                        model.errorMessage = error.localizedDescription
-                                    }
-                                }
-                            } label: {
-                                Label("Sync Remaining", systemImage: "arrow.triangle.2.circlepath")
-                            }
-                            .disabled(model.excelInventoryPath.isEmpty)
-                            Button {
-                                model.clearExcelInventoryPath()
-                            } label: {
-                                Label("Clear Path", systemImage: "xmark.circle")
-                            }
-                            .disabled(model.excelInventoryPath.isEmpty)
-                            Button {
-                                model.acknowledgeSpreadsheetSetup()
-                            } label: {
-                                Label("Skip Excel for Now", systemImage: "forward")
-                            }
-                            Button {
-                                if let url = FileDialogs.chooseCSVSaveURL(defaultName: "Inventory Template.csv") {
-                                    Task { await model.exportBlankInventoryTemplateCSV(to: url) }
-                                }
-                            } label: {
-                                Label("Export Blank CSV Template", systemImage: "doc.badge.plus")
-                            }
+                        } label: {
+                            Label("Export Blank CSV Template", systemImage: "doc.badge.plus")
                         }
                     }
                 }
@@ -1465,25 +1659,17 @@ struct MainView: View {
 
                 Divider()
 
-                HStack {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Maintenance")
-                            .font(.headline)
-                        Text("Clean up duplicate inventory rows or undo the last import in this workspace.")
-                            .foregroundStyle(AppTheme.muted)
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .top, spacing: 16) {
+                        maintenanceSummary
+                        Spacer(minLength: 16)
+                        maintenanceActions
                     }
-                    Spacer()
-                    Button {
-                        Task { await model.removeDuplicateInventoryItems() }
-                    } label: {
-                        Label("Remove Duplicates", systemImage: "rectangle.stack.badge.minus")
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        maintenanceSummary
+                        maintenanceActions
                     }
-                    Button {
-                        Task { await model.undoLastImport() }
-                    } label: {
-                        Label("Undo Last Import", systemImage: "arrow.uturn.backward")
-                    }
-                    .disabled(model.lastImportUndoBackupURL == nil)
                 }
 
                 if let lastImportSummary = model.lastImportSummary {
@@ -1541,20 +1727,98 @@ struct MainView: View {
 
                 Divider()
 
-                HStack {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Workspace Profile")
-                        .font(.headline)
-                    Text("This workspace stores its branding, database path, and spreadsheet connection for the team using it.")
-                        .foregroundStyle(AppTheme.muted)
+                DeleteAllDataControl(model: model) {
+                    inventorySelection = []
+                    deploymentSelection = []
+                    showOnboarding = model.shouldPresentOnboarding
                 }
-                    Spacer()
-                    Text(model.currentUser.role.replacingOccurrences(of: "_", with: " ").capitalized)
-                        .font(.headline)
+                .frostedPanel()
+
+                Divider()
+
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .top, spacing: 16) {
+                        workspaceProfileSummary
+                        Spacer(minLength: 16)
+                        Text(model.currentUser.role.replacingOccurrences(of: "_", with: " ").capitalized)
+                            .font(.headline)
+                    }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        workspaceProfileSummary
+                        Text(model.currentUser.role.replacingOccurrences(of: "_", with: " ").capitalized)
+                            .font(.headline)
+                    }
                 }
             }
             .frostedPanel()
         }
+    }
+
+    private var workspaceDatabaseSummary: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Workspace Database")
+                .font(.headline)
+            Text(model.databaseURL.path)
+                .textSelection(.enabled)
+                .foregroundStyle(AppTheme.muted)
+                .lineLimit(3)
+                .truncationMode(.middle)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("This SQLite database can be backed up, restored, or swapped for another workspace.")
+                .font(.caption)
+                .foregroundStyle(AppTheme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var maintenanceSummary: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Maintenance")
+                .font(.headline)
+            Text("Clean up duplicate inventory rows or undo the last import in this workspace.")
+                .foregroundStyle(AppTheme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var maintenanceActions: some View {
+        adaptiveActionGrid(minimumWidth: 155) {
+            Button {
+                Task { await model.removeDuplicateInventoryItems() }
+            } label: {
+                Label("Remove Duplicates", systemImage: "rectangle.stack.badge.minus")
+            }
+            Button {
+                Task { await model.undoLastImport() }
+            } label: {
+                Label("Undo Last Import", systemImage: "arrow.uturn.backward")
+            }
+            .disabled(model.lastImportUndoBackupURL == nil)
+        }
+        .frame(maxWidth: 340, alignment: .leading)
+    }
+
+    private var workspaceProfileSummary: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Workspace Profile")
+                .font(.headline)
+            Text("This workspace stores its branding, database path, and spreadsheet connection for the team using it.")
+                .foregroundStyle(AppTheme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func adaptiveActionGrid<Content: View>(minimumWidth: CGFloat = 170, @ViewBuilder content: () -> Content) -> some View {
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: minimumWidth), spacing: 8, alignment: .top)],
+            alignment: .leading,
+            spacing: 8
+        ) {
+            content()
+        }
+        .buttonStyle(.bordered)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func vendorRatio(_ value: Double) -> Double {
@@ -1564,51 +1828,39 @@ struct MainView: View {
 
     private var workspaceSetupPanel: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Quick Start")
-                        .font(.title3.bold())
-                    Text("Confirm the workspace name, database, stockrooms, and optional spreadsheet sync before daily use.")
-                        .foregroundStyle(AppTheme.muted)
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 16) {
+                    quickStartHeading
+                    Spacer(minLength: 16)
+                    quickStartStatusActions
                 }
-                Spacer()
-                if model.isWorkspaceEmpty {
-                    HStack(spacing: 8) {
-                        Text("Empty Workspace")
-                            .font(.system(size: 11, weight: .semibold, design: .rounded))
-                            .foregroundStyle(AppTheme.blue)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(AppTheme.controlBackground, in: Capsule())
-                            .overlay(Capsule().stroke(AppTheme.stroke, lineWidth: 1))
-                        Button {
-                            Task { await model.loadDemoWorkspace() }
-                        } label: {
-                            Label("Load Demo", systemImage: "sparkles")
+
+                VStack(alignment: .leading, spacing: 10) {
+                    quickStartHeading
+                    quickStartStatusActions
+                }
+            }
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 10, alignment: .top)], alignment: .leading, spacing: 10) {
+                ForEach(model.setupChecklist) { item in
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: item.isComplete ? "checkmark.circle.fill" : "circle.dotted")
+                            .foregroundStyle(item.isComplete ? AppTheme.teal : AppTheme.muted)
+                            .padding(.top, 2)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(item.title)
+                                .font(.headline)
+                            Text(item.detail)
+                                .font(.caption)
+                                .foregroundStyle(AppTheme.muted)
+                                .lineLimit(3)
+                                .truncationMode(.middle)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .tint(AppTheme.blue)
                     }
                 }
             }
 
-            ForEach(model.setupChecklist) { item in
-                HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: item.isComplete ? "checkmark.circle.fill" : "circle.dotted")
-                        .foregroundStyle(item.isComplete ? AppTheme.teal : AppTheme.muted)
-                        .padding(.top, 2)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(item.title)
-                            .font(.headline)
-                        Text(item.detail)
-                            .font(.caption)
-                            .foregroundStyle(AppTheme.muted)
-                            .lineLimit(2)
-                    }
-                }
-            }
-
-            HStack {
+            adaptiveActionGrid(minimumWidth: 220) {
                 Button {
                     stockroomDraft = StockroomDraft()
                 } label: {
@@ -1646,6 +1898,38 @@ struct MainView: View {
             }
         }
         .frostedPanel()
+    }
+
+    private var quickStartHeading: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Quick Start")
+                .font(.title3.bold())
+            Text("Confirm the workspace name, database, stockrooms, and optional spreadsheet sync before daily use.")
+                .foregroundStyle(AppTheme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder
+    private var quickStartStatusActions: some View {
+        if model.isWorkspaceEmpty {
+            HStack(spacing: 8) {
+                Text("Empty Workspace")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(AppTheme.blue)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(AppTheme.controlBackground, in: Capsule())
+                    .overlay(Capsule().stroke(AppTheme.stroke, lineWidth: 1))
+                Button {
+                    Task { await model.loadDemoWorkspace() }
+                } label: {
+                    Label("Load Demo", systemImage: "sparkles")
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(AppTheme.blue)
+            }
+        }
     }
 
     private func panelHeading(title: String, subtitle: String) -> some View {

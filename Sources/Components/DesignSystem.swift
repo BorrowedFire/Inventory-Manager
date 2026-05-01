@@ -163,16 +163,20 @@ struct SectionShell<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                header
+        GeometryReader { proxy in
+            let contentPadding: CGFloat = proxy.size.width < 760 ? 18 : 28
 
-                content
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    header
+
+                    content
+                }
+                .padding(contentPadding)
             }
-            .padding(28)
+            .scrollContentBackground(.hidden)
+            .background(AppTheme.appBackground)
         }
-        .scrollContentBackground(.hidden)
-        .background(AppTheme.appBackground)
     }
 
     private var header: some View {

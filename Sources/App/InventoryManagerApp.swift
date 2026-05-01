@@ -25,7 +25,7 @@ struct InventoryManagerApp: App {
     var body: some Scene {
         WindowGroup {
             MainView(model: model)
-                .frame(minWidth: 1080, minHeight: 720)
+                .frame(minWidth: 880, minHeight: 620)
                 .preferredColorScheme((AppAppearancePreference(rawValue: appearancePreference) ?? .dark).colorScheme)
         }
         .defaultSize(width: 1440, height: 900)

@@ -32,7 +32,7 @@ struct AppSettingsView: View {
                         .textSelection(.enabled)
                 }
 
-                HStack {
+                settingsActionGrid {
                     Button("Choose…") {
                         if let url = FileDialogs.chooseDatabaseFile() {
                             Task { await model.useDatabase(at: url) }
@@ -78,7 +78,7 @@ struct AppSettingsView: View {
                         .textSelection(.enabled)
                 }
 
-                HStack {
+                settingsActionGrid {
                     Button("Choose Excel Workbook…") {
                         if let url = FileDialogs.chooseExcelFile() {
                             model.setExcelInventoryPath(url.path)
@@ -106,6 +106,10 @@ struct AppSettingsView: View {
                     }
                     .disabled(model.excelInventoryPath.isEmpty)
                 }
+            }
+
+            Section("Danger Zone") {
+                DeleteAllDataControl(model: model)
             }
 
             if let preview = model.importPreview {
@@ -154,5 +158,16 @@ struct AppSettingsView: View {
         if AppAppearancePreference(rawValue: appearancePreference) == nil {
             appearancePreference = AppAppearancePreference.dark.rawValue
         }
+    }
+
+    private func settingsActionGrid<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: 150), spacing: 8, alignment: .top)],
+            alignment: .leading,
+            spacing: 8
+        ) {
+            content()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

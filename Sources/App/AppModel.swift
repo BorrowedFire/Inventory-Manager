@@ -33,6 +33,7 @@ final class AppModel: ObservableObject {
     ]
 
     private enum DefaultsKey {
+        static let appearancePreference = "appearance.preference"
         static let appDisplayName = "workspace.appDisplayName"
         static let organizationName = "workspace.organizationName"
         static let databasePath = "workspace.databasePath"
@@ -45,6 +46,8 @@ final class AppModel: ObservableObject {
         static let lastImportUndoBackupPath = "workspace.lastImportUndoBackupPath"
         static let lastImportUndoExcelBackupPath = "workspace.lastImportUndoExcelBackupPath"
     }
+
+    static let deleteAllDataConfirmationPhrase = "DELETE ALL DATA"
 
     @Published var selectedSection: AppSection = .dashboard
     @Published var dashboard = DashboardSnapshot(stats: [], budgets: [], vendors: [], activity: [])
@@ -730,6 +733,35 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func deleteAllAppDataAndStartFresh() async {
+        isLoading = true
+        defer { isLoading = false }
+
+        let previousDatabaseURL = databaseURL.standardizedFileURL
+        let hadExcelWorkbook = !excelInventoryPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let freshDatabaseURL = Self.defaultWorkspaceDatabaseURL()
+
+        do {
+            try await Task.detached(priority: .userInitiated) {
+                try Self.deleteAppManagedFiles(currentDatabaseURL: previousDatabaseURL)
+            }.value
+
+            resetWorkspaceDefaultsForFreshStart()
+            resetInMemoryWorkspaceState(databaseURL: freshDatabaseURL)
+
+            let freshService = DatabaseService(databaseURL: freshDatabaseURL)
+            databaseService = freshService
+            try await retryingDatabaseCall { try freshService.ensureSchema() }
+            await load()
+
+            lastImportSummary = hadExcelWorkbook
+                ? "All app data was moved to the Trash where macOS allowed it. The Excel workbook was disconnected but not deleted. A fresh workspace is ready."
+                : "All app data was moved to the Trash where macOS allowed it. A fresh workspace is ready."
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     @discardableResult
     private func createImportUndoBackup(label: String) async throws -> URL {
         let backupsDirectory = databaseURL
@@ -753,6 +785,53 @@ final class AppModel: ObservableObject {
             defaults.removeObject(forKey: DefaultsKey.lastImportUndoExcelBackupPath)
         }
         refreshBackupRecords()
+    }
+
+    private func resetWorkspaceDefaultsForFreshStart() {
+        [
+            DefaultsKey.appearancePreference,
+            DefaultsKey.appDisplayName,
+            DefaultsKey.organizationName,
+            DefaultsKey.databasePath,
+            DefaultsKey.excelInventoryPath,
+            DefaultsKey.excelLastSyncMarker,
+            DefaultsKey.onboardingDismissed,
+            DefaultsKey.brandingReviewed,
+            DefaultsKey.databaseReviewed,
+            DefaultsKey.spreadsheetReviewed,
+            DefaultsKey.lastImportUndoBackupPath,
+            DefaultsKey.lastImportUndoExcelBackupPath
+        ].forEach { defaults.removeObject(forKey: $0) }
+    }
+
+    private func resetInMemoryWorkspaceState(databaseURL: URL) {
+        appDisplayName = "Inventory Manager"
+        organizationName = "Standalone Workspace"
+        self.databaseURL = databaseURL
+        excelInventoryPath = ""
+        lastImportSummary = nil
+        importPreview = nil
+        backupRecords = []
+        lastImportUndoBackupURL = nil
+        lastImportUndoExcelBackupURL = nil
+        parsedImportItems = []
+        selectedInventoryID = nil
+        selectedStockroomID = nil
+        selectedSection = .dashboard
+        dashboard = DashboardSnapshot(stats: [], budgets: [], vendors: [], activity: [])
+        budgetDashboard = BudgetDashboardSnapshot(annualSummaries: [], combinedSummaries: [], categorySummaries: [], annualBudgets: [])
+        inventory = []
+        deployments = []
+        stockrooms = []
+        users = []
+        annualBudgetRecords = []
+        resetInventoryFilters()
+        deploymentSearch = ""
+        deploymentSort = .dateNewest
+        deploymentStatusFilter = .all
+        deploymentTypeFilter = "All Types"
+        deploymentLocationFilter = "All Locations"
+        deploymentByFilter = "All Team Members"
     }
 
     private func recordErrorMessage(_ message: String) {
@@ -1655,11 +1734,59 @@ final class AppModel: ObservableObject {
     }
 
     static func defaultWorkspaceDatabaseURL() -> URL {
-        let fileManager = FileManager.default
-        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
-        return appSupport
+        applicationSupportDirectoryURL()
             .appendingPathComponent("InventoryManager", isDirectory: true)
             .appendingPathComponent("InventoryData.sqlite")
+    }
+
+    nonisolated static func applicationSupportDirectoryURL() -> URL {
+        let fileManager = FileManager.default
+        return fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
+    }
+
+    private nonisolated static func deleteAppManagedFiles(currentDatabaseURL: URL) throws {
+        let fileManager = FileManager.default
+        let appDirectory = applicationSupportDirectoryURL()
+            .appendingPathComponent("InventoryManager", isDirectory: true)
+            .standardizedFileURL
+        let tempRollbackDirectory = fileManager.temporaryDirectory
+            .appendingPathComponent("InventoryManagerExcelRollback", isDirectory: true)
+            .standardizedFileURL
+
+        var targets = [appDirectory, tempRollbackDirectory]
+        if !isDescendant(currentDatabaseURL, of: appDirectory) {
+            targets.append(contentsOf: sqliteFileFamily(for: currentDatabaseURL))
+            targets.append(currentDatabaseURL.deletingLastPathComponent().appendingPathComponent("Backups", isDirectory: true))
+        }
+
+        var seenPaths: Set<String> = []
+        for target in targets.map({ $0.standardizedFileURL }) where seenPaths.insert(target.path).inserted {
+            try deleteExistingItem(at: target, fileManager: fileManager)
+        }
+    }
+
+    private nonisolated static func sqliteFileFamily(for url: URL) -> [URL] {
+        [
+            url,
+            URL(fileURLWithPath: url.path + "-shm"),
+            URL(fileURLWithPath: url.path + "-wal")
+        ]
+    }
+
+    private nonisolated static func deleteExistingItem(at url: URL, fileManager: FileManager) throws {
+        guard fileManager.fileExists(atPath: url.path) else { return }
+
+        do {
+            try fileManager.trashItem(at: url, resultingItemURL: nil)
+        } catch {
+            try fileManager.removeItem(at: url)
+        }
+    }
+
+    private nonisolated static func isDescendant(_ url: URL, of directoryURL: URL) -> Bool {
+        let path = url.standardizedFileURL.path
+        let directoryPath = directoryURL.standardizedFileURL.path
+        return path == directoryPath || path.hasPrefix(directoryPath + "/")
     }
 }
