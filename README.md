@@ -2,7 +2,21 @@
 
 Inventory Manager is a native macOS app for local hardware and asset tracking.
 
-It is designed for small teams that need a straightforward desktop inventory database with optional spreadsheet compatibility, PDF-assisted item entry, local backups, and Mac-native workflows.
+It is designed for small teams that need a polished desktop inventory workspace with local SQLite storage, optional spreadsheet compatibility, PDF-assisted item entry, backups, deployment tracking, and Mac-native workflows.
+
+Current release: [v0.1.4](https://github.com/BorrowedFire/Inventory-Manager/releases/latest)
+
+## What it does now
+
+- Tracks inventory, deployments, stockrooms, users, audit activity, budgets, vendors, and item availability.
+- Presents an Apple-centric macOS interface with sidebar navigation, toolbar actions, SF Symbols, dark-first styling, and user-selectable light mode.
+- Supports right-click context menus for inventory rows, deployments, stockrooms, and stockroom item lists.
+- Provides responsive settings and quick-start layouts that reflow at smaller window sizes.
+- Imports from CSV, optional Excel workbooks, and PDF quote or purchase-order documents.
+- Exports inventory CSVs and blank CSV templates.
+- Creates manual backups, restore checkpoints, import undo backups, and Sparkle pre-update backups.
+- Ships with a guarded Danger Zone reset flow that requires multiple confirmations and the typed phrase `DELETE ALL DATA`.
+- Distributes notarized macOS releases with Sparkle appcast assets through GitHub Releases.
 
 ## Privacy-first defaults
 
@@ -11,20 +25,25 @@ It is designed for small teams that need a straightforward desktop inventory dat
 - The repository does not include organization-specific databases, sample customer data, credentials, or employer-specific paths.
 - Spreadsheet sync is optional and user-selected at runtime.
 - The app does not require a server account to run.
+- The app is local-first. Do not put the SQLite database in OneDrive, SharePoint sync, or a shared network folder for multi-user editing. For shared live inventory, use a central database/API backend instead of sharing the local database file.
 
 ## Features
 
-- Inventory, deployments, stockrooms, users, audit activity, and budget views
+- Apple-style dark-first UI with a Settings-selected light mode
+- Adaptive Quick Start and Workspace Database controls for smaller windows
+- Right-click actions for edit, duplicate, deploy, copy, filter, return, and delete workflows
+- Inventory, deployments, stockrooms, users, audit activity, vendor, and budget views
 - Local SQLite persistence with schema migration tracking
 - Demo workspace data for safe first-run exploration
 - Optional Excel workbook import/export sync helper
 - PDF-assisted item parsing with drag-and-drop support and generic fallback extraction
 - CSV export and blank inventory template export
 - Database backup/restore controls
+- Multi-confirmation reset flow for deleting app-managed data and starting fresh
 - User-reviewed support bundle generation for diagnostics and recent app logs
 - macOS sidebar, tables, Settings scene, toolbar actions, and keyboard shortcuts
 - Local security/build/smoke check scripts
-- Developer ID notarization and DMG helper scripts for later distribution
+- Developer ID notarization, Sparkle appcast generation, and GitHub Release publishing scripts
 
 ## Project layout
 
@@ -91,7 +110,18 @@ For a drag-to-Applications DMG after building an app bundle:
 Scripts/create_dmg.sh path/to/Inventory\ Manager.app dist/InventoryManager-macOS.dmg
 ```
 
-For public/team distribution without Gatekeeper warnings, sign with a Developer ID Application certificate and notarize the release artifact with Apple. See `Scripts/notarize_release.sh` for the required environment variables.
+For public/team distribution without Gatekeeper warnings, sign with a Developer ID Application certificate and notarize the release artifact with Apple.
+
+The repo includes non-secret release defaults in `Scripts/release_env.sh`:
+
+- Developer ID identity name
+- local notarytool keychain profile name
+
+The credentials and private keys remain in the local macOS Keychain. To publish a notarized Sparkle-ready GitHub Release from `main`, bump `project.yml`, commit and push, then run:
+
+```bash
+Scripts/release_on_mac.sh <version> <build>
+```
 
 ## Documentation
 

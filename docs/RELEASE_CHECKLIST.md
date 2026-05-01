@@ -26,7 +26,14 @@ Confirm the rehearsal reports:
 
 Run release signing on the maintainer's Mac with a Developer ID Application certificate installed.
 
-Required environment:
+The repo includes `Scripts/release_env.sh` with non-secret defaults for this Mac:
+
+- `DEVELOPER_ID_APPLICATION`
+- `NOTARYTOOL_PROFILE`
+
+The notary credentials and signing private keys stay in the local macOS Keychain.
+
+If running on a different Mac or with a different certificate, override the defaults:
 
 ```bash
 export DEVELOPER_ID_APPLICATION="Developer ID Application: Example LLC (TEAMID)"
@@ -44,12 +51,12 @@ export NOTARYTOOL_PROFILE="inventory-manager-notary"
 Then run:
 
 ```bash
-Scripts/release_on_mac.sh 0.1.2 3
+Scripts/release_on_mac.sh 0.1.4 5
 ```
 
 ## GitHub Release assets
 
-Upload these assets to the GitHub Release:
+The release script creates or updates the GitHub Release with:
 
 - `dist/InventoryManager-macOS.zip`
 - `dist/appcast.xml`

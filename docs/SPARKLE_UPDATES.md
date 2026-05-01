@@ -9,6 +9,8 @@ Inventory Manager includes Sparkle 2 integration for direct-download macOS updat
 - `SUFeedURL` pointing at the GitHub Release appcast location
 - `SUPublicEDKey` configured in `Resources/Info.plist`
 - appcast generation script: `Scripts/make_appcast.sh`
+- end-to-end release script: `Scripts/release_on_mac.sh`
+- repo-safe release defaults: `Scripts/release_env.sh`
 
 ## Signing key
 
@@ -36,9 +38,25 @@ When Sparkle is ready to install an update, Inventory Manager shows a notice exp
 
 ## Release flow
 
-1. Build, Developer ID sign, and notarize the app.
-2. Create the release zip.
-3. Generate the appcast:
+1. Update `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` in `project.yml`.
+2. Run `Scripts/ci_check.sh`.
+3. Commit and push the version bump and app changes to `main`.
+4. Publish from `main`:
+
+```bash
+Scripts/release_on_mac.sh <version> <build>
+```
+
+The release script verifies that local `main` matches `origin/main`, runs the quality gate, rehearses Sparkle update behavior, builds a hardened runtime app, Developer ID signs it, notarizes it with Apple, staples the app, creates the final zip, generates `dist/appcast.xml`, and creates or updates the GitHub Release.
+
+`Scripts/release_env.sh` provides the repo-safe defaults for this Mac:
+
+- `DEVELOPER_ID_APPLICATION`
+- `NOTARYTOOL_PROFILE`
+
+The notary credentials, Developer ID private key, and Sparkle private update key stay in the local macOS Keychain. Do not commit credentials or private keys.
+
+For manual appcast generation after a final notarized zip already exists:
 
 ```bash
 Scripts/make_appcast.sh dist/InventoryManager-macOS.zip dist/appcast.xml
@@ -47,7 +65,7 @@ Scripts/make_appcast.sh dist/InventoryManager-macOS.zip dist/appcast.xml
 The script signs the zip using Sparkle's `sign_update` tool and the Keychain account above.
 When `VERSION` and `BUILD` are not provided, it reads `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` from `project.yml`.
 
-4. Upload both files to the GitHub Release:
+The release uploads both files to the GitHub Release:
 
 - `InventoryManager-macOS.zip`
 - `appcast.xml`
@@ -60,7 +78,6 @@ https://github.com/BorrowedFire/Inventory-Manager/releases/latest/download/appca
 
 ## Notes
 
-- GitHub Release publishing is intentionally not automatic yet.
 - Appcast generation should happen only after the final notarized zip is built.
 - Inventory Manager is not sandboxed, so do not enable Sparkle's sandbox-only `SUEnableInstallerLauncherService` flag unless the app is moved to an App Sandbox configuration with the required XPC service setup.
 - If you move release hosting later, update `SUFeedURL` in `Resources/Info.plist` before shipping that version.

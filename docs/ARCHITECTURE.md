@@ -2,6 +2,14 @@
 
 Inventory Manager is a local-first macOS app built with SwiftUI, SQLite, PDFKit, and a bundled Python/openpyxl workbook helper.
 
+## User experience
+
+The app uses a dark-first SwiftUI interface with Apple-style navigation, SF Symbols, responsive settings layouts, and a user-selectable light mode. Primary records expose context menus so common row actions are available from right-click:
+
+- inventory: edit, duplicate, deploy, copy identifiers, filter, and delete
+- deployments: mark returned, find the inventory item, copy identifiers, and delete
+- stockrooms: edit, open in inventory, and delete
+
 ## App layers
 
 - `Sources/App` — app entry point and `AppModel`, the main actor-bound state coordinator.
@@ -18,13 +26,19 @@ SQLite is the canonical app database. Excel is an optional compatibility surface
 
 Runtime databases, exports, packaged apps, and credentials must never be committed.
 
+## Reset policy
+
+The Settings Danger Zone exposes a start-fresh action for admins or maintainers who intentionally want to remove app-managed local data. The UI requires an initial confirmation, a typed `DELETE ALL DATA` phrase, and a final destructive confirmation before running. The reset removes app-managed SQLite data, backups next to the active workspace database, app support data, and saved preferences where applicable, then creates a fresh default workspace. It disconnects an external Excel workbook path but does not delete the workbook itself.
+
+This reset is a local-app data operation. It is not a substitute for a server-side multi-user inventory lifecycle.
+
 ## Migration policy
 
 `DatabaseService.ensureSchema()` owns schema creation and lightweight migrations. The `schema_migrations` table records applied public schema milestones so future changes can be versioned explicitly.
 
 ## Distribution policy
 
-Local builds are signed ad hoc. Public/team builds should use Developer ID Application signing and notarization. Release binaries should not be published until the maintainer explicitly approves them.
+Local builds are signed ad hoc. Public/team releases are Developer ID signed, Apple notarized, stapled, packaged as `dist/InventoryManager-macOS.zip`, and paired with a Sparkle `appcast.xml` asset on the GitHub Release. `Scripts/release_env.sh` stores repo-safe identity/profile names only; credentials and private keys remain in the local Keychain. Release binaries should not be published until the maintainer explicitly approves them.
 
 ## Release-safety safeguards
 
