@@ -8,6 +8,10 @@ APP_NAME="Inventory Manager.app"
 ZIP_NAME="InventoryManager-macOS.zip"
 NOTARY_SUBMISSION_ZIP="$BUILD_DIR/InventoryManager-notary-submission.zip"
 
+if [[ -f "$ROOT/Scripts/release_env.sh" ]]; then
+  source "$ROOT/Scripts/release_env.sh"
+fi
+
 : "${DEVELOPER_ID_APPLICATION:?Set DEVELOPER_ID_APPLICATION, e.g. Developer ID Application: Name (TEAMID)}"
 
 if ! security find-identity -v -p codesigning | grep -Fq "\"$DEVELOPER_ID_APPLICATION\""; then

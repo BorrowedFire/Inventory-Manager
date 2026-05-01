@@ -6,6 +6,10 @@ VERSION="${1:-}"
 BUILD="${2:-}"
 REPO="${REPO:-BorrowedFire/Inventory-Manager}"
 
+if [[ -f "$ROOT/Scripts/release_env.sh" ]]; then
+  source "$ROOT/Scripts/release_env.sh"
+fi
+
 if [[ -z "$VERSION" || -z "$BUILD" ]]; then
   echo "usage: Scripts/release_on_mac.sh <version> <build>" >&2
   exit 1
