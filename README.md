@@ -25,7 +25,7 @@ Current release: [v0.1.4](https://github.com/BorrowedFire/Inventory-Manager/rele
 - The repository does not include organization-specific databases, sample customer data, credentials, or employer-specific paths.
 - Spreadsheet sync is optional and user-selected at runtime.
 - The app does not require a server account to run.
-- The app is local-first. Do not put the SQLite database in OneDrive, SharePoint sync, or a shared network folder for multi-user editing. For shared live inventory, use a central database/API backend instead of sharing the local database file.
+- The app is local-first. Do not put the SQLite database in a cloud-synced folder or a shared network folder for multi-user editing. For shared live inventory, use a central database/API backend instead of sharing the local database file.
 
 ## Features
 
