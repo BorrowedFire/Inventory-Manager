@@ -511,7 +511,7 @@ struct MainView: View {
                             VStack(alignment: .leading, spacing: 0) {
                                 ForEach(groupedBudgetCategories, id: \.year) { group in
                                     VStack(alignment: .leading, spacing: 8) {
-                                        Text("\(group.year) \(group.typeLabel) SPENDING")
+                                        Text(verbatim: "\(group.year) \(group.typeLabel) SPENDING")
                                             .font(.system(size: 12, weight: .bold, design: .rounded))
                                             .foregroundStyle(AppTheme.blue)
                                         budgetCategoryHeader
@@ -889,10 +889,14 @@ struct MainView: View {
             .width(min: 110, ideal: 150)
             TableColumn("Actions") { deployment in
                 HStack(spacing: 8) {
-                    Button("Mark Returned") {
-                        deploymentToReturn = deployment
+                    if deployment.isReturned {
+                        Text("Returned")
+                            .foregroundStyle(AppTheme.muted)
+                    } else {
+                        Button("Mark Returned") {
+                            deploymentToReturn = deployment
+                        }
                     }
-                    .disabled(deployment.isReturned)
                     Button("Delete", role: .destructive) {
                         deploymentToDelete = deployment
                     }
@@ -1271,7 +1275,7 @@ struct MainView: View {
                         }
                     }
                 }
-                .frame(width: 300, alignment: .topLeading)
+                .frame(width: 260, alignment: .topLeading)
                 .frostedPanel()
 
                 VStack(alignment: .leading, spacing: 14) {
@@ -1290,26 +1294,28 @@ struct MainView: View {
                                 Button {
                                     stockroomDraft = StockroomDraft(id: stockroom.id, name: stockroom.name, location: stockroom.location, department: stockroom.department)
                                 } label: {
-                                    Label("Edit", systemImage: "pencil")
+                                    Label("Edit Stockroom", systemImage: "pencil")
                                 }
+                                .labelStyle(.iconOnly)
+                                .help("Edit Stockroom")
                                 Button(role: .destructive) {
                                     stockroomToDelete = stockroom
                                 } label: {
-                                    Label("Delete", systemImage: "trash")
+                                    Label("Delete Stockroom", systemImage: "trash")
                                 }
+                                .labelStyle(.iconOnly)
+                                .help("Delete Stockroom")
                             }
                         }
-                        HStack {
-                            Text("\(model.selectedStockroomItems.count) records in this stockroom")
-                                .font(.headline)
-                            Spacer()
-                            Button {
-                                model.openInventoryDrilldown(stockroom: stockroom.name)
-                            } label: {
-                                Label("Open in Inventory", systemImage: "shippingbox")
+                        ViewThatFits(in: .horizontal) {
+                            HStack {
+                                stockroomRecordCountText
+                                Spacer()
+                                stockroomActionButtons(for: stockroom)
                             }
-                            Button("New Item Here") {
-                                inventoryEditorItem = AppModel.blankInventoryItem(stockroomId: stockroom.id)
+                            VStack(alignment: .leading, spacing: 10) {
+                                stockroomRecordCountText
+                                stockroomActionButtons(for: stockroom)
                             }
                         }
 
@@ -1354,6 +1360,38 @@ struct MainView: View {
                 .frame(maxWidth: .infinity, alignment: .topLeading)
                 .frostedPanel()
             }
+        }
+    }
+
+    private var stockroomRecordCountText: some View {
+        Text("\(model.selectedStockroomItems.count) records in this stockroom")
+            .font(.headline)
+    }
+
+    private func stockroomActionButtons(for stockroom: StockroomRecord) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                stockroomOpenInventoryButton(for: stockroom)
+                stockroomNewItemButton(for: stockroom)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                stockroomOpenInventoryButton(for: stockroom)
+                stockroomNewItemButton(for: stockroom)
+            }
+        }
+    }
+
+    private func stockroomOpenInventoryButton(for stockroom: StockroomRecord) -> some View {
+        Button {
+            model.openInventoryDrilldown(stockroom: stockroom.name)
+        } label: {
+            Label("Open in Inventory", systemImage: "shippingbox")
+        }
+    }
+
+    private func stockroomNewItemButton(for stockroom: StockroomRecord) -> some View {
+        Button("New Item Here") {
+            inventoryEditorItem = AppModel.blankInventoryItem(stockroomId: stockroom.id)
         }
     }
 
