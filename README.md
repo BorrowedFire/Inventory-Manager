@@ -4,7 +4,7 @@ Inventory Manager is a native macOS app for local hardware and asset tracking.
 
 It is designed for small teams that need a polished desktop inventory workspace with local SQLite storage, optional spreadsheet compatibility, PDF-assisted item entry, backups, deployment tracking, and Mac-native workflows.
 
-Current release: [v0.1.4](https://github.com/BorrowedFire/Inventory-Manager/releases/latest)
+Current release: [v0.1.5](https://github.com/BorrowedFire/Inventory-Manager/releases/latest)
 
 ## What it does now
 

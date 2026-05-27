@@ -51,7 +51,7 @@ export NOTARYTOOL_PROFILE="inventory-manager-notary"
 Then run:
 
 ```bash
-Scripts/release_on_mac.sh 0.1.4 5
+Scripts/release_on_mac.sh 0.1.5 6
 ```
 
 ## GitHub Release assets
