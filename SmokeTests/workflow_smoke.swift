@@ -111,6 +111,28 @@ struct Runner {
         }
         print("blockExcelImportBelowActiveDeployments=\(overDeployImportBlocked ? "ok" : "fail")")
 
+        let zeroQuantityDeploymentSummary = try service.importFromExcel(
+            inventoryItems: [],
+            deployments: [
+                ImportedDeployment(
+                    itemType: firstItem.itemType,
+                    description: firstItem.description,
+                    manufacturer: firstItem.manufacturer,
+                    partNumber: firstItem.partNumber,
+                    qtyDeployed: 0,
+                    deployedTo: "Zero Quantity Import",
+                    deployedBy: "Smoke Test",
+                    deployedDate: "2026-04-07",
+                    deployedLocation: "HQ",
+                    notes: "should be skipped"
+                )
+            ]
+        )
+        let zeroQuantityDeploymentExists = try service.deployments().contains {
+            $0.deployedTo == "Zero Quantity Import" && $0.partNumber == firstItem.partNumber
+        }
+        print("skipZeroQuantityDeploymentImport=\(zeroQuantityDeploymentSummary.deploymentsSkipped == 1 && !zeroQuantityDeploymentExists ? "ok" : "fail")")
+
         var deploymentToDelete: DeploymentRecord?
         if let newDeployment {
             try service.deploy(draft)

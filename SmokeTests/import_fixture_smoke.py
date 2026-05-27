@@ -166,10 +166,15 @@ def main():
         ]
         if ambiguous_rows != [(100, "first ambiguous")]:
             raise AssertionError("delete-inventory removed the wrong no-PO workbook row")
+        deployed_ws = wb["Items Deployed"]
+        deployed_ws.append(["Laptop", "Placeholder zero quantity", "Example Manufacturer", "ZERO-DEP", 0, "Example Team", "Smoke Test", "2026-03-03", "HQ", "should be ignored"])
+        wb.save(workbook)
         inventory = run("read-inventory", workbook, {})
         deployed = run("read-deployed", workbook, {})
         if len(inventory.get("items", [])) < 2 or len(deployed.get("deployments", [])) < 1:
             raise AssertionError("fixture workbook did not round-trip expected rows")
+        if any(deployment.get("partNumber") == "ZERO-DEP" for deployment in deployed.get("deployments", [])):
+            raise AssertionError("read-deployed should ignore zero-quantity placeholder rows")
         run("delete-deployed", workbook, {"deployments": [{
             "itemType": "Laptop",
             "description": "Example Laptop",

@@ -662,7 +662,7 @@ def read_deployed(wb, data, filepath):
     """Read all rows from the Items Deployed sheet and return as JSON."""
     sheet_name = "Items Deployed"
     if sheet_name not in wb.sheetnames:
-        return {"success": False, "error": f"Sheet '{sheet_name}' not found"}
+        return {"success": True, "deployments": [], "count": 0}
 
     ws = wb[sheet_name]
     last_row = find_last_data_row(ws)
@@ -682,7 +682,9 @@ def read_deployed(wb, data, filepath):
         elif date_val:
             deployed_date = str(date_val)
 
-        qty = parse_int(ws.cell(row=row, column=5).value, default=1)
+        qty = parse_int(ws.cell(row=row, column=5).value, default=0)
+        if qty <= 0:
+            continue
 
         dep = {
             "itemType": str(item_type).strip(),

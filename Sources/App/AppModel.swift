@@ -277,15 +277,15 @@ final class AppModel: ObservableObject {
     var setupChecklist: [WorkspaceChecklistItem] {
         [
             WorkspaceChecklistItem(
-                title: "Review workspace name",
-                detail: "\(appDisplayName) for \(organizationName)",
-                isComplete: defaults.bool(forKey: DefaultsKey.brandingReviewed)
-            ),
-            WorkspaceChecklistItem(
-                title: "Choose the workspace database",
+                title: "Create the workspace",
                 detail: databaseURL.path,
                 isComplete: defaults.bool(forKey: DefaultsKey.databaseReviewed) &&
                     FileManager.default.fileExists(atPath: databaseURL.path)
+            ),
+            WorkspaceChecklistItem(
+                title: "Name the workspace",
+                detail: "\(appDisplayName) for \(organizationName)",
+                isComplete: defaults.bool(forKey: DefaultsKey.brandingReviewed)
             ),
             WorkspaceChecklistItem(
                 title: "Create a stockroom",
@@ -293,11 +293,21 @@ final class AppModel: ObservableObject {
                 isComplete: !stockrooms.isEmpty
             ),
             WorkspaceChecklistItem(
-                title: "Review spreadsheet workflow",
-                detail: excelInventoryPath.isEmpty ? "Excel sync optional. No workbook selected." : excelInventoryPath,
-                isComplete: defaults.bool(forKey: DefaultsKey.spreadsheetReviewed)
+                title: "Import existing inventory",
+                detail: importSetupDetail,
+                isComplete: defaults.bool(forKey: DefaultsKey.spreadsheetReviewed) || !inventory.isEmpty
             )
         ]
+    }
+
+    private var importSetupDetail: String {
+        if !inventory.isEmpty {
+            return "\(inventory.count) inventory records loaded"
+        }
+        if !excelInventoryPath.isEmpty {
+            return "Excel workbook selected: \(excelInventoryPath)"
+        }
+        return "Import Excel or CSV, or start with a blank workspace."
     }
 
     var shouldPresentOnboarding: Bool {
@@ -589,6 +599,7 @@ final class AppModel: ObservableObject {
         do {
             let undoURL = try await createImportUndoBackup(label: "excel")
             let summary = try await syncExcel(force: true)
+            acknowledgeSpreadsheetSetup()
             rememberImportUndoBackup(undoURL)
             lastImportSummary = "\(summary.inventoryImported) inventory imported, \(summary.inventoryUpdated) updated, \(summary.inventorySkipped) unchanged; \(summary.deploymentsImported) deployments imported, \(summary.deploymentsUpdated) updated, \(summary.deploymentsSkipped) unchanged."
             await load()
@@ -607,7 +618,11 @@ final class AppModel: ObservableObject {
                 return
             }
             let databaseService = self.databaseService
-            let summary = try await retryingDatabaseCall { try databaseService.importFromExcel(inventoryItems: items, deployments: []) }
+            let defaultStockroomID = defaultImportStockroomID
+            let summary = try await retryingDatabaseCall {
+                try databaseService.importFromExcel(inventoryItems: items, deployments: [], defaultStockroomID: defaultStockroomID)
+            }
+            acknowledgeSpreadsheetSetup()
             rememberImportUndoBackup(undoURL)
             lastImportSummary = "CSV import: \(summary.inventoryImported) inventory imported, \(summary.inventoryUpdated) updated, \(summary.inventorySkipped) unchanged."
             await load()
@@ -1401,7 +1416,8 @@ final class AppModel: ObservableObject {
                 qtyReceived: qtyReceived,
                 poNumber: value(row, ["po number", "po", "purchase order"]),
                 notes: value(row, ["notes"]),
-                budgetType: value(row, ["budget type", "budget"]).isEmpty ? "Capital" : value(row, ["budget type", "budget"])
+                budgetType: value(row, ["budget type", "budget"]).isEmpty ? "Capital" : value(row, ["budget type", "budget"]),
+                stockroomName: value(row, ["stockroom", "stockroom name", "location"])
             )
         }
     }
@@ -1515,11 +1531,22 @@ final class AppModel: ObservableObject {
             try excelService.readWorkbook(at: excelPath)
         }.value
         let databaseService = self.databaseService
+        let defaultStockroomID = defaultImportStockroomID
         let summary = try await retryingDatabaseCall {
-            try databaseService.importFromExcel(inventoryItems: workbook.0, deployments: workbook.1)
+            try databaseService.importFromExcel(inventoryItems: workbook.0, deployments: workbook.1, defaultStockroomID: defaultStockroomID)
         }
         defaults.set(marker, forKey: DefaultsKey.excelLastSyncMarker)
         return summary
+    }
+
+    private var defaultImportStockroomID: Int64? {
+        if let selectedStockroomID {
+            return selectedStockroomID
+        }
+        if stockrooms.count == 1 {
+            return stockrooms.first?.id
+        }
+        return nil
     }
 
     private func excelSyncMarker(for url: URL) -> String {
@@ -1578,6 +1605,11 @@ final class AppModel: ObservableObject {
         for deployment in deployments {
             let key = deploymentIdentity(deployment)
             seenDeploymentKeys[key, default: 0] += 1
+            if deployment.qtyDeployed <= 0 {
+                deploymentConflicts.append("Skipped deployment with blank or zero quantity: \(deployment.partNumber)")
+                rows.append(ImportPreviewRow(kind: "Deployment", action: "Skip", identity: deployment.partNumber, detail: "Qty deployed must be greater than zero."))
+                continue
+            }
             if seenDeploymentKeys[key, default: 0] > 1 {
                 deploymentConflicts.append("Duplicate incoming deployment: \(deployment.partNumber) to \(deployment.deployedTo) on \(deployment.deployedDate)")
                 rows.append(ImportPreviewRow(kind: "Deployment", action: "Conflict", identity: deployment.partNumber, detail: "Duplicate incoming deployment for \(deployment.deployedTo)."))

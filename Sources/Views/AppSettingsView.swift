@@ -70,7 +70,7 @@ struct AppSettingsView: View {
                 BackupBrowserView(model: model)
             }
 
-            Section("Spreadsheet Sync") {
+            Section("Spreadsheet and CSV Imports") {
                 LabeledContent("Excel File") {
                     Text(model.excelInventoryPath.isEmpty ? "None" : model.excelInventoryPath)
                         .lineLimit(2)
@@ -105,6 +105,9 @@ struct AppSettingsView: View {
                         model.clearExcelInventoryPath()
                     }
                     .disabled(model.excelInventoryPath.isEmpty)
+                    Button("Skip Import for Now") {
+                        model.acknowledgeSpreadsheetSetup()
+                    }
                 }
             }
 

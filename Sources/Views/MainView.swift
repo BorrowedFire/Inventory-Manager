@@ -183,6 +183,10 @@ struct MainView: View {
                     stockroomDraft = StockroomDraft()
                     showOnboarding = false
                 },
+                addManualItem: {
+                    startManualInventory()
+                    showOnboarding = false
+                },
                 close: {
                     model.dismissOnboarding()
                     showOnboarding = false
@@ -1900,6 +1904,18 @@ struct MainView: View {
 
             adaptiveActionGrid(minimumWidth: 220) {
                 Button {
+                    Task { await model.createDatabaseAtDefaultLocation() }
+                } label: {
+                    Label("Create Workspace", systemImage: "folder.badge.plus")
+                }
+
+                Button {
+                    model.selectedSection = .settings
+                } label: {
+                    Label("Name Workspace", systemImage: "textformat")
+                }
+
+                Button {
                     stockroomDraft = StockroomDraft()
                 } label: {
                     Label("Create First Stockroom", systemImage: "plus")
@@ -1907,25 +1923,28 @@ struct MainView: View {
                 .disabled(!model.stockrooms.isEmpty)
 
                 Button {
-                    inventoryEditorItem = AppModel.blankInventoryItem(stockroomId: model.selectedStockroomID)
+                    startManualInventory()
                 } label: {
-                    Label("New Inventory Item", systemImage: "plus")
+                    Label("Add Items Manually", systemImage: "square.and.pencil")
                 }
 
                 Button {
-                    model.selectedSection = .settings
+                    chooseExcelWorkbookForImport()
                 } label: {
-                    Label("Open Workspace Settings", systemImage: "gearshape")
+                    Label(model.excelInventoryPath.isEmpty ? "Choose Excel Workbook" : "Preview Excel Import", systemImage: "tablecells")
                 }
 
                 Button {
-                    if let url = FileDialogs.chooseCSVSaveURL(defaultName: "\(model.appDisplayName) Export.csv") {
-                        Task { await model.exportInventoryCSV(to: url) }
-                    }
+                    importCSVFile()
                 } label: {
-                    Label("Export Inventory CSV", systemImage: "square.and.arrow.up")
+                    Label("Import CSV", systemImage: "doc.text")
                 }
-                .disabled(model.inventory.isEmpty)
+
+                Button {
+                    model.acknowledgeSpreadsheetSetup()
+                } label: {
+                    Label("Start Blank", systemImage: "forward")
+                }
 
                 Button {
                     model.resetOnboarding()
@@ -1940,9 +1959,9 @@ struct MainView: View {
 
     private var quickStartHeading: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Quick Start")
+            Text("Workspace Setup")
                 .font(.title3.bold())
-            Text("Confirm the workspace name, database, stockrooms, and optional spreadsheet sync before daily use.")
+            Text("Create the workspace, name it, add the first stockroom, then import existing Excel or CSV inventory.")
                 .foregroundStyle(AppTheme.muted)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -1968,6 +1987,31 @@ struct MainView: View {
                 .tint(AppTheme.blue)
             }
         }
+    }
+
+    private func chooseExcelWorkbookForImport() {
+        if let url = FileDialogs.chooseExcelFile() {
+            model.setExcelInventoryPath(url.path)
+            Task { await model.previewExcelImport() }
+        }
+    }
+
+    private func importCSVFile() {
+        if let url = FileDialogs.chooseCSVFile() {
+            Task { await model.importFromCSV(url: url) }
+        }
+    }
+
+    private func startManualInventory() {
+        model.selectedSection = .stockrooms
+        if model.stockrooms.isEmpty {
+            stockroomDraft = StockroomDraft()
+            return
+        }
+        if model.selectedStockroomID == nil {
+            model.selectedStockroomID = model.stockrooms.first?.id
+        }
+        inventoryEditorItem = AppModel.blankInventoryItem(stockroomId: model.selectedStockroomID)
     }
 
     private func panelHeading(title: String, subtitle: String) -> some View {

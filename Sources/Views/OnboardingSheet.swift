@@ -3,16 +3,17 @@ import SwiftUI
 struct OnboardingSheet: View {
     @ObservedObject var model: AppModel
     let createStockroom: () -> Void
+    let addManualItem: () -> Void
     let close: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Welcome to \(model.appDisplayName)")
+                    Text("Set Up \(model.appDisplayName)")
                         .font(.system(size: 30, weight: .semibold))
                         .foregroundStyle(AppTheme.text)
-                    Text("Use this setup guide to confirm the workspace name, database, stockrooms, and spreadsheet behavior before the team starts working in the app.")
+                    Text("Create the workspace, name it, add the first stockroom, then import existing Excel or CSV inventory when you are ready.")
                         .foregroundStyle(AppTheme.muted)
                 }
                 Spacer()
@@ -41,32 +42,39 @@ struct OnboardingSheet: View {
 
             VStack(alignment: .leading, spacing: 12) {
                 onboardingCallout(
-                    title: "1. Review the workspace name",
-                    body: "The app name and organization label appear throughout the UI and exports, so set them to match the team using this workspace."
+                    title: "1. Create the workspace",
+                    body: "Use the default local database, choose a location, or attach an existing Inventory Manager database before importing data."
                 )
                 onboardingCallout(
-                    title: "2. Choose the database location",
-                    body: "Create a fresh database for a new team, attach an existing database, or use the default local workspace location."
+                    title: "2. Name the workspace",
+                    body: "Set the workspace name and organization label so reports, exports, and support bundles identify the right team."
                 )
                 onboardingCallout(
-                    title: "3. Create stockrooms",
-                    body: "Stockrooms make inventory location filters and deployment context much more useful once items start arriving."
+                    title: "3. Create the first stockroom",
+                    body: "Choose the room or cage where imported inventory should land first. Additional stockrooms can be added later."
                 )
                 onboardingCallout(
-                    title: "4. Decide how Excel should work",
-                    body: "If the spreadsheet is still part of the workflow, connect it here. The app can read manual workbook changes on launch and also write updates back to Excel."
+                    title: "4. Import existing inventory",
+                    body: "Bring in an Excel workbook or CSV once the workspace and first stockroom exist, or start blank and import later."
                 )
             }
 
-            HStack {
+            adaptiveOnboardingActions {
+                Button {
+                    Task { await model.createDatabaseAtDefaultLocation() }
+                } label: {
+                    Label("Create Workspace", systemImage: "folder.badge.plus")
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(AppTheme.blue)
+
                 Button {
                     model.selectedSection = .settings
                     close()
                 } label: {
-                    Label("Open Settings", systemImage: "gearshape")
+                    Label("Name Workspace", systemImage: "textformat")
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(AppTheme.blue)
+                .buttonStyle(.bordered)
 
                 Button {
                     model.selectedSection = .stockrooms
@@ -76,16 +84,59 @@ struct OnboardingSheet: View {
                 }
                 .buttonStyle(.bordered)
 
-                Spacer()
-
-                Button("Skip for Now") {
-                    close()
+                Button {
+                    addManualItem()
+                } label: {
+                    Label("Add Items Manually", systemImage: "square.and.pencil")
                 }
+                .buttonStyle(.bordered)
+
+                Button {
+                    chooseExcelWorkbook()
+                } label: {
+                    Label(model.excelInventoryPath.isEmpty ? "Choose Excel" : "Preview Excel", systemImage: "tablecells")
+                }
+                .buttonStyle(.bordered)
+
+                Button {
+                    importCSVFile()
+                } label: {
+                    Label("Import CSV", systemImage: "doc.text")
+                }
+                .buttonStyle(.bordered)
+
+                Button {
+                    model.acknowledgeSpreadsheetSetup()
+                    close()
+                } label: {
+                    Label("Start Blank", systemImage: "forward")
+                }
+                .buttonStyle(.bordered)
             }
         }
         .padding(28)
         .frame(width: 760)
         .background(AppTheme.appBackground)
+    }
+
+    private func adaptiveOnboardingActions<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10, content: content)
+            VStack(alignment: .leading, spacing: 10, content: content)
+        }
+    }
+
+    private func chooseExcelWorkbook() {
+        if let url = FileDialogs.chooseExcelFile() {
+            model.setExcelInventoryPath(url.path)
+            Task { await model.previewExcelImport() }
+        }
+    }
+
+    private func importCSVFile() {
+        if let url = FileDialogs.chooseCSVFile() {
+            Task { await model.importFromCSV(url: url) }
+        }
     }
 
     private func onboardingCallout(title: String, body: String) -> some View {

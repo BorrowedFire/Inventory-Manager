@@ -13,6 +13,37 @@ struct ImportedInventoryItem: Decodable {
     let poNumber: String
     let notes: String
     let budgetType: String
+    let stockroomName: String?
+
+    init(
+        itemType: String,
+        description: String,
+        manufacturer: String,
+        partNumber: String,
+        purchaseDate: String,
+        vendor: String,
+        unitCost: Double,
+        quantity: Int,
+        qtyReceived: Int,
+        poNumber: String,
+        notes: String,
+        budgetType: String,
+        stockroomName: String? = nil
+    ) {
+        self.itemType = itemType
+        self.description = description
+        self.manufacturer = manufacturer
+        self.partNumber = partNumber
+        self.purchaseDate = purchaseDate
+        self.vendor = vendor
+        self.unitCost = unitCost
+        self.quantity = quantity
+        self.qtyReceived = qtyReceived
+        self.poNumber = poNumber
+        self.notes = notes
+        self.budgetType = budgetType
+        self.stockroomName = stockroomName
+    }
 }
 
 struct ImportedDeployment: Decodable {

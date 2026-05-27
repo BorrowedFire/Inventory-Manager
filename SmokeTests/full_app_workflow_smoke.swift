@@ -155,6 +155,7 @@ struct FullAppWorkflowSmoke {
         try csv.write(to: csvURL, atomically: true, encoding: .utf8)
         await model.importFromCSV(url: csvURL)
         try require(model.inventory.count == countBeforeImport + 1, "CSV import did not add a row")
+        try require(model.inventory.first(where: { $0.partNumber == "MON-FULL-001" })?.stockroomName == "Main Cage", "CSV import did not assign the configured stockroom")
         try require(model.lastImportUndoBackupURL != nil, "CSV import did not create an undo backup")
         await model.undoLastImport()
         try require(model.inventory.count == countBeforeImport, "undo last import did not restore pre-import inventory count")

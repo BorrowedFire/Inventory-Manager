@@ -1226,12 +1226,13 @@ final class DatabaseService: @unchecked Sendable {
         }
     }
 
-    func importFromExcel(inventoryItems: [ImportedInventoryItem], deployments: [ImportedDeployment]) throws -> ImportSummary {
+    func importFromExcel(inventoryItems: [ImportedInventoryItem], deployments: [ImportedDeployment], defaultStockroomID: Int64? = nil) throws -> ImportSummary {
         try withTransaction { db in
             let existingInventory = try query(
                 """
                 SELECT
                   id,
+                  stockroomId,
                   lower(trim(COALESCE(partNumber, ''))) AS partNumber,
                   lower(trim(COALESCE(poNumber, ''))) AS poNumber,
                   lower(trim(COALESCE(vendor, ''))) AS vendor,
@@ -1266,6 +1267,8 @@ final class DatabaseService: @unchecked Sendable {
 
             for item in inventoryItems {
                 try validateInventoryValues(quantity: item.quantity, qtyReceived: item.qtyReceived, unitCost: item.unitCost)
+                let requestedStockroomID = try importStockroomID(named: item.stockroomName, fallback: defaultStockroomID, db: db)
+                let shouldUpdateStockroom = item.stockroomName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
                 let key = inventorySyncKey(
                     partNumber: item.partNumber,
                     poNumber: item.poNumber,
@@ -1287,7 +1290,8 @@ final class DatabaseService: @unchecked Sendable {
                         existingRow.int(named: "qtyReceived") != item.qtyReceived ||
                         existingRow.string(named: "poNumber") != normalized(item.poNumber) ||
                         normalized(existingRow.string(named: "notes")) != normalized(item.notes) ||
-                        normalized(existingRow.string(named: "budgetType")) != normalized(normalizedBudgetType)
+                        normalized(existingRow.string(named: "budgetType")) != normalized(normalizedBudgetType) ||
+                        (shouldUpdateStockroom && existingRow.optionalInt64(named: "stockroomId") != requestedStockroomID)
 
                     if hasChanges {
                         let inventoryID = existingRow.int64(named: "id")
@@ -1300,13 +1304,15 @@ final class DatabaseService: @unchecked Sendable {
                             UPDATE inventory_items
                             SET itemType = ?, description = ?, manufacturer = ?, partNumber = ?, purchaseDate = NULLIF(?, ''),
                                 vendor = NULLIF(?, ''), unitCost = ?, quantity = ?, qtyReceived = ?, poNumber = NULLIF(?, ''),
-                                notes = NULLIF(?, ''), budgetType = ?, updatedAt = CURRENT_TIMESTAMP
+                                notes = NULLIF(?, ''), budgetType = ?, stockroomId = CASE WHEN ? THEN ? ELSE stockroomId END,
+                                updatedAt = CURRENT_TIMESTAMP
                             WHERE id = ?
                             """,
                             bindings: [
                                 .text(item.itemType), .text(item.description), .text(item.manufacturer), .text(item.partNumber),
                                 .text(item.purchaseDate), .text(item.vendor), .double(item.unitCost), .int(item.quantity),
                                 .int(item.qtyReceived), .text(item.poNumber), .text(item.notes), .text(normalizedBudgetType),
+                                .int(shouldUpdateStockroom ? 1 : 0), .optionalInt64(requestedStockroomID),
                                 .int64(inventoryID)
                             ],
                             db: db
@@ -1321,13 +1327,14 @@ final class DatabaseService: @unchecked Sendable {
                 try execute(
                     """
                     INSERT INTO inventory_items
-                    (itemType, description, manufacturer, partNumber, purchaseDate, vendor, unitCost, quantity, qtyReceived, poNumber, notes, budgetType)
-                    VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?)
+                    (itemType, description, manufacturer, partNumber, purchaseDate, vendor, unitCost, quantity, qtyReceived, poNumber, notes, budgetType, stockroomId)
+                    VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?)
                     """,
                     bindings: [
                         .text(item.itemType), .text(item.description), .text(item.manufacturer), .text(item.partNumber),
                         .text(item.purchaseDate), .text(item.vendor), .double(item.unitCost), .int(item.quantity),
-                        .int(item.qtyReceived), .text(item.poNumber), .text(item.notes), .text(item.budgetType.isEmpty ? "Capital" : item.budgetType)
+                        .int(item.qtyReceived), .text(item.poNumber), .text(item.notes), .text(item.budgetType.isEmpty ? "Capital" : item.budgetType),
+                        .optionalInt64(requestedStockroomID)
                     ],
                     db: db
                 )
@@ -1337,6 +1344,7 @@ final class DatabaseService: @unchecked Sendable {
                     """
                     SELECT
                       id,
+                      stockroomId,
                       lower(trim(COALESCE(partNumber, ''))) AS partNumber,
                       lower(trim(COALESCE(poNumber, ''))) AS poNumber,
                       lower(trim(COALESCE(vendor, ''))) AS vendor,
@@ -1397,6 +1405,10 @@ final class DatabaseService: @unchecked Sendable {
             var deploymentsSkipped = 0
 
             for deployment in deployments {
+                guard deployment.qtyDeployed > 0 else {
+                    deploymentsSkipped += 1
+                    continue
+                }
                 let key = deploymentSyncKey(
                     partNumber: deployment.partNumber,
                     description: deployment.description,
@@ -1817,6 +1829,29 @@ final class DatabaseService: @unchecked Sendable {
             db: db
         )
         return rows.first?.int64(named: "id")
+    }
+
+    private func importStockroomID(named stockroomName: String?, fallback: Int64?, db: OpaquePointer?) throws -> Int64? {
+        guard let stockroomName else { return fallback }
+        let trimmedName = stockroomName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else { return fallback }
+
+        let rows = try query(
+            """
+            SELECT id
+            FROM stockrooms
+            WHERE lower(trim(name)) = lower(trim(?))
+            ORDER BY id ASC
+            LIMIT 1
+            """,
+            bindings: [.text(trimmedName)],
+            db: db
+        )
+
+        guard let id = rows.first?.int64(named: "id") else {
+            throw DatabaseError.stepFailed("Stockroom '\(trimmedName)' was not found. Create it before importing, or leave the stockroom column blank.")
+        }
+        return id
     }
 
     private func availableQuantity(for inventoryItemId: Int64) throws -> Int {
